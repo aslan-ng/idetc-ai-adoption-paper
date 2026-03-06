@@ -1,7 +1,7 @@
-# surrogate_ode.py
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import combinations_with_replacement
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -12,13 +12,9 @@ from utils import BASE_DIR
 
 
 STATE_ORDER = ["S", "Q", "L", "B"]
+POLY_DEGREE = 6
 
-
-# ============================================================
-# Feature engineering
-# ============================================================
-
-FEATURE_COLUMNS = [
+BASE_INPUT_COLUMNS = [
     "teams_num",
     "teams_size",
     "agents_average_initial_opinion",
@@ -26,48 +22,83 @@ FEATURE_COLUMNS = [
 ]
 
 
-def build_feature_vector(row: pd.Series) -> Dict[str, float]:
+# ============================================================
+# Polynomial features (degree 6) + scaling
+# ============================================================
+
+def generate_polynomial_powers(n_vars: int, degree: int):
+    powers = [(0,) * n_vars]
+
+    for d in range(1, degree + 1):
+        for combo in combinations_with_replacement(range(n_vars), d):
+            exps = [0] * n_vars
+            for idx in combo:
+                exps[idx] += 1
+            powers.append(tuple(exps))
+
+    return powers
+
+
+def power_name(exponents, base_names):
+    if sum(exponents) == 0:
+        return "bias"
+
+    parts = []
+    for name, exp in zip(base_names, exponents):
+        if exp == 0:
+            continue
+        if exp == 1:
+            parts.append(name)
+        else:
+            parts.append(f"{name}^{exp}")
+    return "*".join(parts)
+
+
+def fit_input_scaler(df: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Create linear-regression features from one row of settings.
-    Includes main effects + pairwise interactions + squared terms.
-
-    Still linear in coefficients, but more expressive than pure linear.
+    Fit standardization parameters on the base inputs.
     """
-    tn = float(row["teams_num"])
-    ts = float(row["teams_size"])
-    op = float(row["agents_average_initial_opinion"])
-    sr = float(row["technology_success_rate"])
-
-    feats = {
-        "bias": 1.0,
-        "teams_num": tn,
-        "teams_size": ts,
-        "initial_opinion": op,
-        "success_rate": sr,
-
-        "teams_num_sq": tn ** 2,
-        "teams_size_sq": ts ** 2,
-        "initial_opinion_sq": op ** 2,
-        "success_rate_sq": sr ** 2,
-
-        "teams_num_x_teams_size": tn * ts,
-        "teams_num_x_initial_opinion": tn * op,
-        "teams_num_x_success_rate": tn * sr,
-        "teams_size_x_initial_opinion": ts * op,
-        "teams_size_x_success_rate": ts * sr,
-        "initial_opinion_x_success_rate": op * sr,
-    }
-    return feats
+    X_base = df[BASE_INPUT_COLUMNS].to_numpy(dtype=float)
+    mu = X_base.mean(axis=0)
+    sigma = X_base.std(axis=0, ddof=0)
+    sigma = np.where(sigma == 0.0, 1.0, sigma)
+    return mu, sigma
 
 
-def build_design_matrix(settings_df: pd.DataFrame) -> tuple[np.ndarray, List[str]]:
-    feature_dicts = [build_feature_vector(row) for _, row in settings_df.iterrows()]
-    feature_names = list(feature_dicts[0].keys())
+def transform_inputs(
+    df: pd.DataFrame,
+    mu: np.ndarray,
+    sigma: np.ndarray,
+) -> np.ndarray:
+    """
+    Standardize base inputs using supplied mu and sigma.
+    """
+    X_base = df[BASE_INPUT_COLUMNS].to_numpy(dtype=float)
+    return (X_base - mu) / sigma
 
-    X = np.array(
-        [[fd[name] for name in feature_names] for fd in feature_dicts],
-        dtype=float,
-    )
+
+def build_design_matrix(
+    df: pd.DataFrame,
+    mu: np.ndarray,
+    sigma: np.ndarray,
+):
+    X_base = transform_inputs(df, mu, sigma)
+    n_samples, n_vars = X_base.shape
+
+    powers = generate_polynomial_powers(n_vars, POLY_DEGREE)
+    feature_names = [power_name(p, BASE_INPUT_COLUMNS) for p in powers]
+
+    X = np.ones((n_samples, len(powers)), dtype=float)
+
+    for j, p in enumerate(powers):
+        col = np.ones(n_samples, dtype=float)
+
+        for var_idx, exp in enumerate(p):
+            if exp != 0:
+                col *= X_base[:, var_idx] ** exp
+
+        X[:, j] = col
+
     return X, feature_names
 
 
@@ -75,19 +106,17 @@ def build_design_matrix(settings_df: pd.DataFrame) -> tuple[np.ndarray, List[str
 # Target loading
 # ============================================================
 
-def offdiag_transition_names(state_order: List[str] = STATE_ORDER) -> List[str]:
+def offdiag_transition_names():
     names = []
-    for i, si in enumerate(state_order):
-        for j, sj in enumerate(state_order):
+    for i, si in enumerate(STATE_ORDER):
+        for j, sj in enumerate(STATE_ORDER):
             if i != j:
                 names.append(f"{si}->{sj}")
     return names
 
 
-def load_one_ode_result(npz_path: Path) -> Dict[str, float]:
-    """
-    Load one saved ODE fit artifact and return off-diagonal rates as a dict.
-    """
+def load_one_ode_result(npz_path: Path):
+
     data = np.load(npz_path, allow_pickle=True)
 
     transitions = data["transitions"].tolist()
@@ -96,11 +125,8 @@ def load_one_ode_result(npz_path: Path) -> Dict[str, float]:
     return {str(k): float(v) for k, v in zip(transitions, rates)}
 
 
-def load_training_dataframe(base_dir: Path) -> pd.DataFrame:
-    """
-    Merge settings.csv with saved ode results by model_name.
-    Returns one training row per model with inputs + targets.
-    """
+def load_training_dataframe(base_dir: Path):
+
     settings_path = base_dir / "settings.csv"
     odes_dir = base_dir / "odes"
 
@@ -111,26 +137,15 @@ def load_training_dataframe(base_dir: Path) -> pd.DataFrame:
 
     settings_df = pd.read_csv(settings_path)
 
-    if "name" not in settings_df.columns:
-        raise ValueError("settings.csv must contain a 'name' column.")
-
-    required_input_cols = [
-        "name",
-        "teams_num",
-        "teams_size",
-        "agents_average_initial_opinion",
-        "technology_success_rate",
-    ]
-    missing = set(required_input_cols) - set(settings_df.columns)
-    if missing:
-        raise ValueError(f"Missing settings columns: {sorted(missing)}")
+    target_names = offdiag_transition_names()
 
     rows = []
-    expected_targets = offdiag_transition_names()
 
     for _, row in settings_df.iterrows():
+
         model_name = str(row["name"])
         npz_path = odes_dir / f"{model_name}.npz"
+
         if not npz_path.exists():
             continue
 
@@ -144,251 +159,139 @@ def load_training_dataframe(base_dir: Path) -> pd.DataFrame:
             "technology_success_rate": float(row["technology_success_rate"]),
         }
 
-        for tname in expected_targets:
-            out[tname] = float(target_dict.get(tname, 0.0))
+        for t in target_names:
+            out[t] = target_dict.get(t, 0.0)
 
         rows.append(out)
 
     if not rows:
-        raise ValueError("No training rows found. Make sure .npz ODE files exist.")
+        raise ValueError("No training rows found.")
 
     return pd.DataFrame(rows)
 
 
 # ============================================================
-# Linear regression (dependency-free)
+# Linear regression
 # ============================================================
 
 @dataclass
 class LinearRateModel:
+
+    degree: int
     feature_names: List[str]
     transition_names: List[str]
-    beta: np.ndarray  # shape (n_features, n_targets)
+    beta: np.ndarray
+
+    mu: np.ndarray
+    sigma: np.ndarray
+
     train_rmse_by_target: Dict[str, float]
     train_r2_by_target: Dict[str, float]
 
+    overall_train_rmse: float
+    overall_train_r2: float
 
-def fit_multioutput_linear_model(training_df: pd.DataFrame) -> LinearRateModel:
-    """
-    Fit one linear model for all off-diagonal rates simultaneously:
-        Y = X B
 
-    Uses ordinary least squares via np.linalg.lstsq.
-    """
-    X, feature_names = build_design_matrix(training_df)
+def fit_surrogate(training_df: pd.DataFrame) -> LinearRateModel:
+
+    mu, sigma = fit_input_scaler(training_df)
+    X, feature_names = build_design_matrix(training_df, mu, sigma)
+
     transition_names = offdiag_transition_names()
-
     Y = training_df[transition_names].to_numpy(dtype=float)
 
     beta, *_ = np.linalg.lstsq(X, Y, rcond=None)
     Y_hat = X @ beta
 
-    rmse_by_target: Dict[str, float] = {}
-    r2_by_target: Dict[str, float] = {}
+    rmse_by_target = {}
+    r2_by_target = {}
 
-    for k, tname in enumerate(transition_names):
+    for k, name in enumerate(transition_names):
+
         y = Y[:, k]
         yhat = Y_hat[:, k]
-        rmse = float(np.sqrt(np.mean((y - yhat) ** 2)))
 
-        ss_res = float(np.sum((y - yhat) ** 2))
-        ss_tot = float(np.sum((y - np.mean(y)) ** 2))
-        r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else np.nan
+        rmse = np.sqrt(np.mean((y - yhat) ** 2))
 
-        rmse_by_target[tname] = rmse
-        r2_by_target[tname] = r2
+        ss_res = np.sum((y - yhat) ** 2)
+        ss_tot = np.sum((y - np.mean(y)) ** 2)
+
+        r2 = 1 - ss_res / ss_tot if ss_tot > 0 else np.nan
+
+        rmse_by_target[name] = float(rmse)
+        r2_by_target[name] = float(r2)
+
+    overall_rmse = float(np.sqrt(np.mean((Y - Y_hat) ** 2)))
+
+    ss_res_all = np.sum((Y - Y_hat) ** 2)
+    ss_tot_all = np.sum((Y - np.mean(Y)) ** 2)
+    overall_r2 = float(1 - ss_res_all / ss_tot_all) if ss_tot_all > 0 else np.nan
 
     return LinearRateModel(
+        degree=POLY_DEGREE,
         feature_names=feature_names,
         transition_names=transition_names,
         beta=beta,
+        mu=mu,
+        sigma=sigma,
         train_rmse_by_target=rmse_by_target,
         train_r2_by_target=r2_by_target,
+        overall_train_rmse=overall_rmse,
+        overall_train_r2=overall_r2,
     )
 
 
 # ============================================================
-# Prediction utilities
+# Save surrogate
 # ============================================================
 
-def _features_from_inputs(
-    teams_num: float,
-    teams_size: float,
-    agents_average_initial_opinion: float,
-    technology_success_rate: float,
-    feature_names: List[str],
-) -> np.ndarray:
-    row = pd.Series({
-        "teams_num": teams_num,
-        "teams_size": teams_size,
-        "agents_average_initial_opinion": agents_average_initial_opinion,
-        "technology_success_rate": technology_success_rate,
-    })
-    feat_dict = build_feature_vector(row)
-    return np.array([feat_dict[name] for name in feature_names], dtype=float)
+def save_surrogate_model(base_dir: Path, model: LinearRateModel):
 
-
-def predict_rates(
-    model: LinearRateModel,
-    *,
-    teams_num: float,
-    teams_size: float,
-    agents_average_initial_opinion: float,
-    technology_success_rate: float,
-    clip_nonnegative: bool = True,
-) -> Dict[str, float]:
-    """
-    Predict off-diagonal rates for one input setting.
-    """
-    x = _features_from_inputs(
-        teams_num=teams_num,
-        teams_size=teams_size,
-        agents_average_initial_opinion=agents_average_initial_opinion,
-        technology_success_rate=technology_success_rate,
-        feature_names=model.feature_names,
-    )
-
-    y = x @ model.beta
-
-    if clip_nonnegative:
-        y = np.maximum(y, 0.0)
-
-    return {
-        tname: float(val)
-        for tname, val in zip(model.transition_names, y)
-    }
-
-
-def rates_to_generator(
-    rate_dict: Dict[str, float],
-    state_order: List[str] = STATE_ORDER,
-) -> np.ndarray:
-    """
-    Convert off-diagonal rates into a valid CTMC generator matrix Q.
-    """
-    idx = {s: i for i, s in enumerate(state_order)}
-    Q = np.zeros((len(state_order), len(state_order)), dtype=float)
-
-    for key, val in rate_dict.items():
-        src, dst = key.split("->")
-        i = idx[src]
-        j = idx[dst]
-        if i == j:
-            continue
-        Q[i, j] = max(0.0, float(val))
-
-    np.fill_diagonal(Q, -np.sum(Q, axis=1))
-    return Q
-
-
-def predict_generator(
-    model: LinearRateModel,
-    *,
-    teams_num: float,
-    teams_size: float,
-    agents_average_initial_opinion: float,
-    technology_success_rate: float,
-) -> tuple[np.ndarray, Dict[str, float]]:
-    rate_dict = predict_rates(
-        model,
-        teams_num=teams_num,
-        teams_size=teams_size,
-        agents_average_initial_opinion=agents_average_initial_opinion,
-        technology_success_rate=technology_success_rate,
-        clip_nonnegative=True,
-    )
-    Q = rates_to_generator(rate_dict)
-    return Q, rate_dict
-
-
-# ============================================================
-# Save / load surrogate
-# ============================================================
-
-def save_surrogate_model(base_dir: Path, model: LinearRateModel) -> Path:
     out_dir = base_dir / "surrogates"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    out_path = out_dir / "ode_rate_surrogate.npz"
+    path = out_dir / "ode_rate_surrogate.npz"
 
     np.savez_compressed(
-        out_path,
+        path,
+        degree=model.degree,
         feature_names=np.array(model.feature_names, dtype="U"),
         transition_names=np.array(model.transition_names, dtype="U"),
         beta=model.beta,
+        mu=model.mu,
+        sigma=model.sigma,
+        overall_train_rmse=model.overall_train_rmse,
+        overall_train_r2=model.overall_train_r2,
         rmse_keys=np.array(list(model.train_rmse_by_target.keys()), dtype="U"),
         rmse_vals=np.array(list(model.train_rmse_by_target.values()), dtype=float),
         r2_keys=np.array(list(model.train_r2_by_target.keys()), dtype="U"),
         r2_vals=np.array(list(model.train_r2_by_target.values()), dtype=float),
     )
-    return out_path
 
-
-def load_surrogate_model(npz_path: Path) -> LinearRateModel:
-    data = np.load(npz_path, allow_pickle=True)
-
-    feature_names = data["feature_names"].tolist()
-    transition_names = data["transition_names"].tolist()
-    beta = data["beta"]
-
-    rmse_keys = data["rmse_keys"].tolist()
-    rmse_vals = data["rmse_vals"].astype(float).tolist()
-    r2_keys = data["r2_keys"].tolist()
-    r2_vals = data["r2_vals"].astype(float).tolist()
-
-    return LinearRateModel(
-        feature_names=[str(x) for x in feature_names],
-        transition_names=[str(x) for x in transition_names],
-        beta=np.array(beta, dtype=float),
-        train_rmse_by_target={str(k): float(v) for k, v in zip(rmse_keys, rmse_vals)},
-        train_r2_by_target={str(k): float(v) for k, v in zip(r2_keys, r2_vals)},
-    )
+    return path
 
 
 # ============================================================
-# Reporting
+# Main
 # ============================================================
 
-def print_fit_summary(model: LinearRateModel) -> None:
-    print("\nSurrogate fit summary")
-    print("-" * 60)
-    for tname in model.transition_names:
-        rmse = model.train_rmse_by_target[tname]
-        r2 = model.train_r2_by_target[tname]
-        print(f"{tname:>4s} | RMSE = {rmse:.6f} | R^2 = {r2:.4f}")
-    print("-" * 60)
+def train_and_save_surrogate(base_dir: Path = BASE_DIR):
 
-
-# ============================================================
-# Main workflow
-# ============================================================
-
-def train_and_save_surrogate(base_dir: Path = BASE_DIR) -> Path:
     training_df = load_training_dataframe(base_dir)
-    model = fit_multioutput_linear_model(training_df)
-    print_fit_summary(model)
-    out_path = save_surrogate_model(base_dir, model)
-    print(f"\nSaved surrogate model to: {out_path}")
-    return out_path
+    model = fit_surrogate(training_df)
+
+    print(f"\nPolynomial surrogate (degree = {POLY_DEGREE})")
+    print("samples:", len(training_df))
+    print("features:", len(model.feature_names))
+    print("overall train RMSE:", model.overall_train_rmse)
+    print("overall train R2:", model.overall_train_r2)
+
+    path = save_surrogate_model(base_dir, model)
+
+    print("\nSaved surrogate model to:", path)
+
+    return path
 
 
 if __name__ == "__main__":
-    surrogate_path = train_and_save_surrogate(BASE_DIR)
-
-    # Example usage
-    model = load_surrogate_model(surrogate_path)
-
-    Q_pred, rates_pred = predict_generator(
-        model,
-        teams_num=10,
-        teams_size=10,
-        agents_average_initial_opinion=0.2,
-        technology_success_rate=0.8,
-    )
-
-    print("\nPredicted off-diagonal rates:")
-    for k, v in rates_pred.items():
-        print(f"{k}: {v:.6f}")
-
-    print("\nPredicted generator Q:")
-    print(Q_pred)
+    train_and_save_surrogate()

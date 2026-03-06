@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from itertools import combinations_with_replacement
+from math import comb
 from pathlib import Path
 from typing import Dict, List, Tuple
-
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
@@ -10,11 +12,13 @@ from utils import BASE_DIR
 
 
 STATE_ORDER = ["S", "Q", "L", "B"]
+BASE_INPUT_COLUMNS = [
+    "teams_num",
+    "teams_size",
+    "agents_average_initial_opinion",
+    "technology_success_rate",
+]
 
-
-# ============================================================
-# Data loading
-# ============================================================
 
 def offdiag_transition_names(state_order: List[str] = STATE_ORDER) -> List[str]:
     names = []
@@ -83,125 +87,59 @@ def load_training_dataframe(base_dir: Path) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-# ============================================================
-# Polynomial features
-# ============================================================
-
-BASE_INPUTS = [
-    "teams_num",
-    "teams_size",
-    "agents_average_initial_opinion",
-    "technology_success_rate",
-]
-
-
-def build_polynomial_feature_dict(row: pd.Series, degree: int) -> Dict[str, float]:
+def generate_polynomial_powers(n_vars: int, max_degree: int) -> List[Tuple[int, ...]]:
     """
-    Polynomial features up to degree 4 for the 4 input variables.
-
-    degree=1:
-        bias + main effects
-
-    degree=2:
-        + squares + pairwise interactions
-
-    degree=3:
-        + cubes + square-linear interactions + triple interaction
-
-    degree=4:
-        + quartics + selected mixed quartic terms
+    Returns exponent tuples for all monomials with total degree <= max_degree.
+    Includes bias term (0,0,...,0).
     """
-    tn = float(row["teams_num"])
-    ts = float(row["teams_size"])
-    op = float(row["agents_average_initial_opinion"])
-    sr = float(row["technology_success_rate"])
+    powers: List[Tuple[int, ...]] = [(0,) * n_vars]
 
-    f = {
-        "bias": 1.0,
-        "teams_num": tn,
-        "teams_size": ts,
-        "initial_opinion": op,
-        "success_rate": sr,
-    }
+    for deg in range(1, max_degree + 1):
+        for combo in combinations_with_replacement(range(n_vars), deg):
+            exponents = [0] * n_vars
+            for idx in combo:
+                exponents[idx] += 1
+            powers.append(tuple(exponents))
 
-    if degree >= 2:
-        f.update({
-            "teams_num_sq": tn**2,
-            "teams_size_sq": ts**2,
-            "initial_opinion_sq": op**2,
-            "success_rate_sq": sr**2,
-
-            "teams_num_x_teams_size": tn * ts,
-            "teams_num_x_initial_opinion": tn * op,
-            "teams_num_x_success_rate": tn * sr,
-            "teams_size_x_initial_opinion": ts * op,
-            "teams_size_x_success_rate": ts * sr,
-            "initial_opinion_x_success_rate": op * sr,
-        })
-
-    if degree >= 3:
-        f.update({
-            "teams_num_cu": tn**3,
-            "teams_size_cu": ts**3,
-            "initial_opinion_cu": op**3,
-            "success_rate_cu": sr**3,
-
-            "teams_num_sq_x_teams_size": tn**2 * ts,
-            "teams_num_sq_x_initial_opinion": tn**2 * op,
-            "teams_num_sq_x_success_rate": tn**2 * sr,
-            "teams_size_sq_x_teams_num": ts**2 * tn,
-            "teams_size_sq_x_initial_opinion": ts**2 * op,
-            "teams_size_sq_x_success_rate": ts**2 * sr,
-            "initial_opinion_sq_x_teams_num": op**2 * tn,
-            "initial_opinion_sq_x_teams_size": op**2 * ts,
-            "initial_opinion_sq_x_success_rate": op**2 * sr,
-            "success_rate_sq_x_teams_num": sr**2 * tn,
-            "success_rate_sq_x_teams_size": sr**2 * ts,
-            "success_rate_sq_x_initial_opinion": sr**2 * op,
-
-            "teams_num_x_teams_size_x_initial_opinion": tn * ts * op,
-            "teams_num_x_teams_size_x_success_rate": tn * ts * sr,
-            "teams_num_x_initial_opinion_x_success_rate": tn * op * sr,
-            "teams_size_x_initial_opinion_x_success_rate": ts * op * sr,
-        })
-
-    if degree >= 4:
-        f.update({
-            "teams_num_qt": tn**4,
-            "teams_size_qt": ts**4,
-            "initial_opinion_qt": op**4,
-            "success_rate_qt": sr**4,
-
-            "teams_num_sq_x_teams_size_sq": tn**2 * ts**2,
-            "teams_num_sq_x_initial_opinion_sq": tn**2 * op**2,
-            "teams_num_sq_x_success_rate_sq": tn**2 * sr**2,
-            "teams_size_sq_x_initial_opinion_sq": ts**2 * op**2,
-            "teams_size_sq_x_success_rate_sq": ts**2 * sr**2,
-            "initial_opinion_sq_x_success_rate_sq": op**2 * sr**2,
-
-            "teams_num_sq_x_teams_size_x_initial_opinion": tn**2 * ts * op,
-            "teams_num_sq_x_teams_size_x_success_rate": tn**2 * ts * sr,
-            "teams_num_x_teams_size_sq_x_initial_opinion": tn * ts**2 * op,
-            "teams_num_x_teams_size_sq_x_success_rate": tn * ts**2 * sr,
-            "teams_num_x_initial_opinion_sq_x_success_rate": tn * op**2 * sr,
-            "teams_size_x_initial_opinion_sq_x_success_rate": ts * op**2 * sr,
-            "teams_num_x_initial_opinion_x_success_rate_sq": tn * op * sr**2,
-            "teams_size_x_initial_opinion_x_success_rate_sq": ts * op * sr**2,
-        })
-
-    return f
+    return powers
 
 
-def build_design_matrix(df: pd.DataFrame, degree: int) -> Tuple[np.ndarray, List[str]]:
-    feature_dicts = [build_polynomial_feature_dict(row, degree) for _, row in df.iterrows()]
-    feature_names = list(feature_dicts[0].keys())
-    X = np.array([[fd[name] for name in feature_names] for fd in feature_dicts], dtype=float)
+def power_name(exponents: Tuple[int, ...], base_names: List[str]) -> str:
+    if sum(exponents) == 0:
+        return "bias"
+
+    parts = []
+    for name, exp in zip(base_names, exponents):
+        if exp == 0:
+            continue
+        if exp == 1:
+            parts.append(name)
+        else:
+            parts.append(f"{name}^{exp}")
+    return "*".join(parts)
+
+
+def build_design_matrix(
+    df: pd.DataFrame,
+    degree: int,
+    base_input_columns: List[str] = BASE_INPUT_COLUMNS,
+) -> Tuple[np.ndarray, List[str]]:
+    X_base = df[base_input_columns].to_numpy(dtype=float)  # (n,4)
+    n_samples, n_vars = X_base.shape
+
+    powers = generate_polynomial_powers(n_vars=n_vars, max_degree=degree)
+    feature_names = [power_name(p, base_input_columns) for p in powers]
+
+    X = np.ones((n_samples, len(powers)), dtype=float)
+    for j, p in enumerate(powers):
+        col = np.ones(n_samples, dtype=float)
+        for var_idx, exp in enumerate(p):
+            if exp != 0:
+                col *= X_base[:, var_idx] ** exp
+        X[:, j] = col
+
     return X, feature_names
 
-
-# ============================================================
-# Regression + metrics
-# ============================================================
 
 def fit_ols(X: np.ndarray, Y: np.ndarray) -> np.ndarray:
     beta, *_ = np.linalg.lstsq(X, Y, rcond=None)
@@ -256,7 +194,7 @@ def cross_validate_degree(
         fold_rmse_all.append(rmse(Y_test, Y_pred))
         fold_r2_all.append(r2_score(Y_test.ravel(), Y_pred.ravel()))
 
-    X_full, feature_names = build_design_matrix(training_df, degree=degree)
+    X_full, _ = build_design_matrix(training_df, degree=degree)
     Y_full = training_df[target_names].to_numpy(dtype=float)
     beta_full = fit_ols(X_full, Y_full)
     Y_hat_full = X_full @ beta_full
@@ -264,24 +202,28 @@ def cross_validate_degree(
     return {
         "degree": degree,
         "n_features": X_full.shape[1],
+        "feature_count_formula": comb(4 + degree, degree),
+        "samples": len(training_df),
+        "samples_per_feature": float(len(training_df) / X_full.shape[1]),
         "cv_rmse_mean": float(np.mean(fold_rmse_all)),
         "cv_rmse_std": float(np.std(fold_rmse_all)),
         "cv_r2_mean": float(np.mean(fold_r2_all)),
         "train_rmse": rmse(Y_full, Y_hat_full),
         "train_r2": r2_score(Y_full.ravel(), Y_hat_full.ravel()),
+        "overfit_gap": float(np.mean(fold_rmse_all) - rmse(Y_full, Y_hat_full)),
     }
 
 
 def compare_polynomial_degrees(
     base_dir: Path = BASE_DIR,
-    degrees: List[int] = [1, 2, 3, 4],
+    max_degree: int = 8,
     k_folds: int = 5,
     seed: int = 42,
 ) -> pd.DataFrame:
     training_df = load_training_dataframe(base_dir)
 
     results = []
-    for degree in degrees:
+    for degree in range(1, max_degree + 1):
         res = cross_validate_degree(
             training_df=training_df,
             degree=degree,
@@ -290,14 +232,62 @@ def compare_polynomial_degrees(
         )
         results.append(res)
 
-    result_df = pd.DataFrame(results).sort_values("cv_rmse_mean").reset_index(drop=True)
+    result_df = pd.DataFrame(results).sort_values("degree").reset_index(drop=True)
     return result_df
+
+def plot_model_selection_results(result_df, base_dir):
+    """
+    Plot training vs cross-validation RMSE with CV error bars.
+    Saves a single figure for the paper.
+    """
+
+    fig_dir = base_dir / "figures"
+    fig_dir.mkdir(parents=True, exist_ok=True)
+
+    deg = result_df["degree"]
+
+    plt.figure(figsize=(6,4))
+
+    # Training curve
+    plt.plot(
+        deg,
+        result_df["train_rmse"],
+        marker="o",
+        label="Train RMSE",
+    )
+
+    # CV curve with error bars
+    plt.errorbar(
+        deg,
+        result_df["cv_rmse_mean"],
+        yerr=result_df["cv_rmse_std"],
+        marker="o",
+        capsize=4,
+        label="CV RMSE",
+    )
+
+    plt.xlabel("Polynomial Degree")
+    plt.ylabel("RMSE")
+    plt.title("Training vs Validation Error")
+    plt.legend()
+    plt.grid(True)
+
+    plt.tight_layout()
+
+    plt.savefig(
+        fig_dir / "surrogate_model_selection.png",
+        dpi=300,
+        bbox_inches="tight"
+    )
+
+    plt.close()
 
 
 if __name__ == "__main__":
+
     result_df = compare_polynomial_degrees(
         base_dir=BASE_DIR,
-        degrees=[1, 2, 3, 4],
+        max_degree=8,
         k_folds=5,
         seed=42,
     )
@@ -305,7 +295,9 @@ if __name__ == "__main__":
     print("\nPolynomial surrogate model comparison")
     print(result_df.to_string(index=False))
 
-    best = result_df.iloc[0]
+    best_idx = result_df["cv_rmse_mean"].idxmin()
+    best = result_df.loc[best_idx]
+
     print("\nBest model by CV RMSE:")
     print(
         f"degree={int(best['degree'])}, "
@@ -313,3 +305,8 @@ if __name__ == "__main__":
         f"cv_rmse_mean={best['cv_rmse_mean']:.6f}, "
         f"cv_r2_mean={best['cv_r2_mean']:.4f}"
     )
+
+    # ---- generate figures ----
+    plot_model_selection_results(result_df, BASE_DIR)
+
+    print("\nFigures saved to:", BASE_DIR / "figures")

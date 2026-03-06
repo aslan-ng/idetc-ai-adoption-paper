@@ -1,6 +1,7 @@
 # predict_surrogate.py
 from __future__ import annotations
 
+from itertools import combinations_with_replacement
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -10,6 +11,12 @@ from utils import BASE_DIR
 
 
 STATE_ORDER = ["S", "Q", "L", "B"]
+BASE_INPUT_COLUMNS = [
+    "teams_num",
+    "teams_size",
+    "agents_average_initial_opinion",
+    "technology_success_rate",
+]
 
 
 class LinearRateModel:
@@ -22,17 +29,27 @@ class LinearRateModel:
 
     def __init__(
         self,
+        degree: int,
         feature_names: List[str],
         transition_names: List[str],
         beta: np.ndarray,
+        mu: np.ndarray,
+        sigma: np.ndarray,
         train_rmse_by_target: Dict[str, float],
         train_r2_by_target: Dict[str, float],
+        overall_train_rmse: float,
+        overall_train_r2: float,
     ) -> None:
+        self.degree = degree
         self.feature_names = feature_names
         self.transition_names = transition_names
         self.beta = beta
+        self.mu = mu
+        self.sigma = sigma
         self.train_rmse_by_target = train_rmse_by_target
         self.train_r2_by_target = train_r2_by_target
+        self.overall_train_rmse = overall_train_rmse
+        self.overall_train_r2 = overall_train_r2
 
 
 def load_surrogate_model(npz_path: Path | None = None) -> LinearRateModel:
@@ -54,53 +71,64 @@ def load_surrogate_model(npz_path: Path | None = None) -> LinearRateModel:
     feature_names = [str(x) for x in data["feature_names"].tolist()]
     transition_names = [str(x) for x in data["transition_names"].tolist()]
     beta = np.array(data["beta"], dtype=float)
+    mu = np.array(data["mu"], dtype=float)
+    sigma = np.array(data["sigma"], dtype=float)
 
     rmse_keys = [str(x) for x in data["rmse_keys"].tolist()]
     rmse_vals = [float(x) for x in data["rmse_vals"].astype(float).tolist()]
     r2_keys = [str(x) for x in data["r2_keys"].tolist()]
     r2_vals = [float(x) for x in data["r2_vals"].astype(float).tolist()]
 
+    degree = int(np.array(data["degree"]).item())
+    overall_train_rmse = float(np.array(data["overall_train_rmse"]).item())
+    overall_train_r2 = float(np.array(data["overall_train_r2"]).item())
+
     return LinearRateModel(
+        degree=degree,
         feature_names=feature_names,
         transition_names=transition_names,
         beta=beta,
+        mu=mu,
+        sigma=sigma,
         train_rmse_by_target={k: v for k, v in zip(rmse_keys, rmse_vals)},
         train_r2_by_target={k: v for k, v in zip(r2_keys, r2_vals)},
+        overall_train_rmse=overall_train_rmse,
+        overall_train_r2=overall_train_r2,
     )
 
 
-def _build_feature_dict(
+def generate_polynomial_powers(n_vars: int, degree: int) -> List[Tuple[int, ...]]:
+    powers = [(0,) * n_vars]
+
+    for d in range(1, degree + 1):
+        for combo in combinations_with_replacement(range(n_vars), d):
+            exps = [0] * n_vars
+            for idx in combo:
+                exps[idx] += 1
+            powers.append(tuple(exps))
+
+    return powers
+
+
+def _standardize_inputs(
     *,
     teams_num: float,
     teams_size: float,
     agents_average_initial_opinion: float,
     technology_success_rate: float,
-) -> Dict[str, float]:
-    """
-    Must match the feature engineering used in create_surrogate.py.
-    """
-    tn = float(teams_num)
-    ts = float(teams_size)
-    op = float(agents_average_initial_opinion)
-    sr = float(technology_success_rate)
-
-    return {
-        "bias": 1.0,
-        "teams_num": tn,
-        "teams_size": ts,
-        "initial_opinion": op,
-        "success_rate": sr,
-        "teams_num_sq": tn ** 2,
-        "teams_size_sq": ts ** 2,
-        "initial_opinion_sq": op ** 2,
-        "success_rate_sq": sr ** 2,
-        "teams_num_x_teams_size": tn * ts,
-        "teams_num_x_initial_opinion": tn * op,
-        "teams_num_x_success_rate": tn * sr,
-        "teams_size_x_initial_opinion": ts * op,
-        "teams_size_x_success_rate": ts * sr,
-        "initial_opinion_x_success_rate": op * sr,
-    }
+    mu: np.ndarray,
+    sigma: np.ndarray,
+) -> np.ndarray:
+    x = np.array(
+        [
+            float(teams_num),
+            float(teams_size),
+            float(agents_average_initial_opinion),
+            float(technology_success_rate),
+        ],
+        dtype=float,
+    )
+    return (x - mu) / sigma
 
 
 def _build_feature_vector(
@@ -109,15 +137,43 @@ def _build_feature_vector(
     teams_size: float,
     agents_average_initial_opinion: float,
     technology_success_rate: float,
-    feature_names: List[str],
+    model: LinearRateModel,
 ) -> np.ndarray:
-    feat_dict = _build_feature_dict(
+    """
+    Must match the feature engineering used in create_surrogate.py:
+    - standardize inputs using saved mu/sigma
+    - build full polynomial basis up to saved degree
+    """
+    x_scaled = _standardize_inputs(
         teams_num=teams_num,
         teams_size=teams_size,
         agents_average_initial_opinion=agents_average_initial_opinion,
         technology_success_rate=technology_success_rate,
+        mu=model.mu,
+        sigma=model.sigma,
     )
-    return np.array([feat_dict[name] for name in feature_names], dtype=float)
+
+    powers = generate_polynomial_powers(
+        n_vars=len(BASE_INPUT_COLUMNS),
+        degree=model.degree,
+    )
+
+    x_features = np.ones(len(powers), dtype=float)
+
+    for j, p in enumerate(powers):
+        value = 1.0
+        for var_idx, exp in enumerate(p):
+            if exp != 0:
+                value *= x_scaled[var_idx] ** exp
+        x_features[j] = value
+
+    if len(x_features) != len(model.feature_names):
+        raise ValueError(
+            "Feature length mismatch. The saved surrogate model and prediction "
+            "feature builder are inconsistent."
+        )
+
+    return x_features
 
 
 def predict_offdiag_rates(
@@ -138,7 +194,7 @@ def predict_offdiag_rates(
         teams_size=teams_size,
         agents_average_initial_opinion=agents_average_initial_opinion,
         technology_success_rate=technology_success_rate,
-        feature_names=model.feature_names,
+        model=model,
     )
 
     y = x @ model.beta
@@ -215,9 +271,6 @@ def stationary_distribution_from_generator(
     if Q.shape[0] != Q.shape[1]:
         raise ValueError("Q must be square")
 
-    # Solve:
-    #   Q^T * pi^T = 0
-    # with final row replaced by normalization sum(pi)=1
     A = Q.T.copy()
     A[-1, :] = 1.0
 
@@ -226,7 +279,6 @@ def stationary_distribution_from_generator(
 
     pi, *_ = np.linalg.lstsq(A, b, rcond=None)
 
-    # numerical cleanup
     pi = np.maximum(pi, 0.0)
     total = pi.sum()
     if total <= 0:
@@ -248,7 +300,7 @@ def predict_steady_state_ratios(
     surrogate_path: Path | None = None,
 ) -> Dict[str, float]:
     """
-    Main end-to-end function you want.
+    Main end-to-end function.
 
     Inputs:
         teams_num
@@ -302,6 +354,9 @@ def predict_full_surrogate_output(
     steady_state = stationary_distribution_from_generator(Q, STATE_ORDER)
 
     return {
+        "degree": model.degree,
+        "overall_train_rmse": model.overall_train_rmse,
+        "overall_train_r2": model.overall_train_r2,
         "rates": rates,
         "Q": Q,
         "steady_state": steady_state,
@@ -313,8 +368,12 @@ if __name__ == "__main__":
         teams_num=10,
         teams_size=10,
         agents_average_initial_opinion=0.2,
-        technology_success_rate=0.8,
+        technology_success_rate=0.7,
     )
+
+    print(f"\nLoaded polynomial surrogate (degree = {result['degree']})")
+    print(f"overall train RMSE = {result['overall_train_rmse']:.6f}")
+    print(f"overall train R2   = {result['overall_train_r2']:.6f}")
 
     print("\nPredicted off-diagonal rates:")
     for k, v in result["rates"].items():
