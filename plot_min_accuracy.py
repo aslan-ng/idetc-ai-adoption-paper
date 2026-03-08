@@ -145,7 +145,7 @@ if __name__ == "__main__":
         target_adoption=0.5,
         teams_num_list=[1, 5, 10, 15, 20, 25, 30],
         teams_size_list=[5, 10, 15, 20],
-        save_name="figure_structure_min_accuracy_1.png",
+        save_name="figure_structure_min_accuracy_pos.png",
         color_min=0.6,
         color_max=1.0,
     )
@@ -155,7 +155,7 @@ if __name__ == "__main__":
         target_adoption=0.5,
         teams_num_list=[1, 5, 10, 15, 20, 25, 30],
         teams_size_list=[5, 10, 15, 20],
-        save_name="figure_structure_min_accuracy_2.png",
+        save_name="figure_structure_min_accuracy_neg.png",
         color_min=0.6,
         color_max=1.0,
     )
