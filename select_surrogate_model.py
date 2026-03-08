@@ -1,3 +1,20 @@
+"""
+Select polynomial degree for the ODE-rate surrogate model.
+
+What this file does:
+1. Builds a training table by joining `settings.csv` inputs with fitted ODE
+   transition rates from `odes/*.npz`.
+2. Constructs polynomial feature expansions of the four input variables.
+3. Fits multi-output linear OLS models for candidate polynomial degrees.
+4. Runs k-fold cross-validation to compare train/CV RMSE and R^2 by degree.
+5. Saves a model-selection figure (`figures/surrogate_model_selection.png`).
+
+How it is used in the pipeline:
+- This is the surrogate model-selection step before final surrogate training.
+- Its selected degree is used by the surrogate creation/prediction scripts that
+  drive downstream validation and decision-analysis figures in the IDETC paper.
+"""
+
 from __future__ import annotations
 
 from itertools import combinations_with_replacement

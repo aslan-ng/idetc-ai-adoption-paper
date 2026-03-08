@@ -1,3 +1,20 @@
+"""
+Plot minimum required AI accuracy to reach a target adoption level.
+
+What this file does:
+1. Uses the surrogate ODE model to predict steady-state adoption (Q + L).
+2. For each organizational structure setting, finds the smallest
+   `technology_success_rate` that achieves a chosen target adoption.
+3. Visualizes that threshold as a heatmap over:
+   - number of teams
+   - team size
+4. Saves publication-ready figures to `figures/`.
+
+How it is used in the pipeline:
+- Supports decision analysis by translating adoption targets into minimum
+  AI-performance requirements under different organizational structures.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path

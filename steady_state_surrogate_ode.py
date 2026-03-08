@@ -1,3 +1,21 @@
+"""
+Predict steady-state SQLB composition from the surrogate ODE model.
+
+What this file does:
+1. Loads the trained surrogate rate model.
+2. Predicts a CTMC generator matrix Q from scenario inputs.
+3. Computes the long-run state:
+       x_inf = lim_{t->infinity} x0 expm(Q t)
+   using `compute_long_run_state`.
+4. Returns steady-state ratios for S, Q, L, B and adoption (Q + L).
+
+How it is used in the pipeline:
+- Provides steady-state surrogate predictions for analysis scripts and
+  validation against fitted-ODE steady states.
+- Acts as the core API for threshold/composition studies that rely on
+  surrogate long-run behavior.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path

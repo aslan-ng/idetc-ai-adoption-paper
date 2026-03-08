@@ -1,0 +1,600 @@
+"""
+Validate the ABM -> surrogate-ODE pipeline across all model configurations.
+
+This module compares ABM SQLB state-fraction trajectories against
+surrogate-predicted ODE trajectories for every model in the experiment set.
+
+Validation outputs:
+    1. Per-model trajectory metrics
+    2. Summary statistics across all models
+    3. Error histograms
+    4. Parity plots for final state fractions and final adoption
+    5. Optional example overlays for selected models
+
+Definitions:
+    - ABM reference trajectory:
+          x_abm(t) = [S(t), Q(t), L(t), B(t)]
+    - Surrogate trajectory:
+          x_sur(t) obtained by:
+              (a) predicting CTMC generator Q from the surrogate
+              (b) simulating dx/dt = xQ from the ABM initial condition
+    - Final adoption:
+          adoption(T) = Q(T) + L(T)
+
+Expected files:
+    - states/{model_name}.csv
+    - settings.csv
+    - saved surrogate model file (loaded by load_surrogate_model)
+
+Outputs:
+    - figures/validation_abm_to_surrogate/validation_abm_to_surrogate_*.png
+    - (Optional) validation_abm_to_surrogate.csv
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
+from predict_surrogate import load_surrogate_model, predict_generator
+from utils import BASE_DIR, get_all_model_names
+
+
+STATE_ORDER = ["S", "Q", "L", "B"]
+
+
+def _load_states_df(states_dir: Path, model_name: str) -> pd.DataFrame:
+    csv_path = states_dir / f"{model_name}.csv"
+    if not csv_path.exists():
+        raise FileNotFoundError(f"State CSV not found: {csv_path}")
+
+    df = pd.read_csv(csv_path)
+    required = {"t", "ratio_S", "ratio_Q", "ratio_L", "ratio_B"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing columns in {csv_path.name}: {sorted(missing)}")
+
+    df = df.sort_values("t").reset_index(drop=True)
+    return df
+
+
+def _load_settings_row(settings_path: Path, model_name: str) -> pd.Series:
+    if not settings_path.exists():
+        raise FileNotFoundError(f"settings.csv not found: {settings_path}")
+
+    df = pd.read_csv(settings_path)
+    if "name" not in df.columns:
+        raise ValueError("settings.csv must contain a 'name' column.")
+
+    match = df.loc[df["name"].astype(str) == str(model_name)]
+    if match.empty:
+        raise ValueError(f"Model name '{model_name}' not found in settings.csv")
+
+    return match.iloc[0]
+
+
+def _simulate_ode_fractions(
+    Q: np.ndarray,
+    x0: np.ndarray,
+    T: int,
+    *,
+    dt: float = 1.0,
+) -> np.ndarray:
+    """
+    Forward simulate fractions with explicit Euler:
+        x_{t+1} = x_t + dt * (x_t @ Q)
+    """
+    x = np.zeros((T, 4), dtype=float)
+    x[0] = x0
+
+    for t in range(T - 1):
+        x[t + 1] = x[t] + dt * (x[t] @ Q)
+
+        # Numerical safety
+        x[t + 1] = np.clip(x[t + 1], 0.0, 1.0)
+        s = x[t + 1].sum()
+        if s > 0:
+            x[t + 1] /= s
+
+    return x
+
+
+def _extract_abm_array(df: pd.DataFrame) -> np.ndarray:
+    return df[["ratio_S", "ratio_Q", "ratio_L", "ratio_B"]].to_numpy(dtype=float)
+
+
+def _compute_state_metrics(
+    abm: np.ndarray,
+    surrogate: np.ndarray,
+    *,
+    min_adoption_for_composition: float = 1e-3,
+) -> dict[str, float]:
+    diff = surrogate - abm
+    abs_diff = np.abs(diff)
+    sq_diff = diff**2
+
+    out: dict[str, float] = {}
+
+    # Per-state metrics over full trajectory
+    for i, state in enumerate(STATE_ORDER):
+        out[f"rmse_{state}"] = float(np.sqrt(np.mean(sq_diff[:, i])))
+        out[f"mae_{state}"] = float(np.mean(abs_diff[:, i]))
+        out[f"final_abs_error_{state}"] = float(abs_diff[-1, i])
+
+    # Aggregate trajectory metrics
+    out["trajectory_rmse"] = float(np.sqrt(np.mean(sq_diff)))
+    out["trajectory_mae"] = float(np.mean(abs_diff))
+    out["max_abs_error"] = float(np.max(abs_diff))
+
+    # Adoption metrics
+    abm_adoption = abm[:, 1] + abm[:, 2]
+    surrogate_adoption = surrogate[:, 1] + surrogate[:, 2]
+
+    out["rmse_adoption"] = float(
+        np.sqrt(np.mean((surrogate_adoption - abm_adoption) ** 2))
+    )
+    out["mae_adoption"] = float(
+        np.mean(np.abs(surrogate_adoption - abm_adoption))
+    )
+    out["final_abm_adoption"] = float(abm_adoption[-1])
+    out["final_surrogate_adoption"] = float(surrogate_adoption[-1])
+    out["final_abs_error_adoption"] = float(
+        abs(surrogate_adoption[-1] - abm_adoption[-1])
+    )
+
+    # Composition metrics at final time
+    abm_final_adoption = float(abm_adoption[-1])
+    surrogate_final_adoption = float(surrogate_adoption[-1])
+
+    if abm_final_adoption >= min_adoption_for_composition:
+        abm_quiet_share = float(abm[-1, 1] / abm_final_adoption)
+        abm_loud_share = float(abm[-1, 2] / abm_final_adoption)
+    else:
+        abm_quiet_share = np.nan
+        abm_loud_share = np.nan
+
+    if surrogate_final_adoption >= min_adoption_for_composition:
+        surrogate_quiet_share = float(surrogate[-1, 1] / surrogate_final_adoption)
+        surrogate_loud_share = float(surrogate[-1, 2] / surrogate_final_adoption)
+    else:
+        surrogate_quiet_share = np.nan
+        surrogate_loud_share = np.nan
+
+    out["final_abm_quiet_share"] = abm_quiet_share
+    out["final_abm_loud_share"] = abm_loud_share
+    out["final_surrogate_quiet_share"] = surrogate_quiet_share
+    out["final_surrogate_loud_share"] = surrogate_loud_share
+
+    out["final_abs_error_quiet_share"] = (
+        float(abs(surrogate_quiet_share - abm_quiet_share))
+        if np.isfinite(abm_quiet_share) and np.isfinite(surrogate_quiet_share)
+        else np.nan
+    )
+    out["final_abs_error_loud_share"] = (
+        float(abs(surrogate_loud_share - abm_loud_share))
+        if np.isfinite(abm_loud_share) and np.isfinite(surrogate_loud_share)
+        else np.nan
+    )
+
+    return out
+
+
+def evaluate_single_model(
+    base_dir: Path,
+    model_name: str,
+    *,
+    surrogate_model,
+    min_adoption_for_composition: float = 1e-3,
+    simulation_dt: float = 1.0,
+) -> dict[str, float]:
+    states_dir = base_dir / "states"
+    settings_path = base_dir / "settings.csv"
+
+    df = _load_states_df(states_dir, model_name)
+    settings_row = _load_settings_row(settings_path, model_name)
+
+    Q_surrogate, rates_surrogate = predict_generator(
+        surrogate_model,
+        teams_num=float(settings_row["teams_num"]),
+        teams_size=float(settings_row["teams_size"]),
+        agents_average_initial_opinion=float(settings_row["agents_average_initial_opinion"]),
+        technology_success_rate=float(settings_row["technology_success_rate"]),
+    )
+
+    abm = _extract_abm_array(df)
+    T = len(df)
+    x0 = abm[0].copy()
+
+    surrogate = _simulate_ode_fractions(
+        Q_surrogate,
+        x0,
+        T,
+        dt=simulation_dt,
+    )
+
+    row: dict[str, float] = {
+        "model_name": model_name,
+        "T": int(T),
+        "dt": float(simulation_dt),
+        "teams_num": float(settings_row["teams_num"]),
+        "teams_size": float(settings_row["teams_size"]),
+        "agents_average_initial_opinion": float(settings_row["agents_average_initial_opinion"]),
+        "technology_success_rate": float(settings_row["technology_success_rate"]),
+    }
+
+    row.update(
+        _compute_state_metrics(
+            abm,
+            surrogate,
+            min_adoption_for_composition=min_adoption_for_composition,
+        )
+    )
+
+    return row
+
+
+def evaluate_all_models(
+    base_dir: Path,
+    *,
+    surrogate_path: str | Path | None = None,
+    min_adoption_for_composition: float = 1e-3,
+    simulation_dt: float = 1.0,
+    verbose: bool = True,
+) -> pd.DataFrame:
+    model_names = get_all_model_names(base_dir)
+    surrogate_model = load_surrogate_model(
+        Path(surrogate_path) if surrogate_path is not None else None
+    )
+
+    rows: list[dict[str, float]] = []
+
+    for i, model_name in enumerate(model_names, start=1):
+        try:
+            row = evaluate_single_model(
+                base_dir,
+                model_name,
+                surrogate_model=surrogate_model,
+                min_adoption_for_composition=min_adoption_for_composition,
+                simulation_dt=simulation_dt,
+            )
+            rows.append(row)
+            if verbose:
+                print(f"[{i}/{len(model_names)}] validated {model_name}")
+        except Exception as e:
+            print(f"[{i}/{len(model_names)}] skipped {model_name}: {e}")
+
+    if not rows:
+        raise RuntimeError("No models were successfully validated.")
+
+    return pd.DataFrame(rows)
+
+
+def print_summary_table(results_df: pd.DataFrame) -> None:
+    summary_cols = [
+        "trajectory_rmse",
+        "trajectory_mae",
+        "rmse_adoption",
+        "mae_adoption",
+        "final_abs_error_adoption",
+        "final_abs_error_quiet_share",
+        "final_abs_error_loud_share",
+        "max_abs_error",
+    ]
+    available = [c for c in summary_cols if c in results_df.columns]
+
+    print("\nValidation summary statistics:")
+    print(results_df[available].describe().round(6))
+
+
+def _save_fig(fig: plt.Figure, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
+
+def plot_error_histograms(
+    results_df: pd.DataFrame,
+    *,
+    save_dir: Path,
+    show: bool = False,
+) -> None:
+    metrics = [
+        ("trajectory_rmse", "Trajectory RMSE"),
+        ("final_abs_error_adoption", "Final adoption absolute error"),
+        ("final_abs_error_quiet_share", "Final quiet-share absolute error"),
+        ("final_abs_error_loud_share", "Final loud-share absolute error"),
+    ]
+
+    for col, title in metrics:
+        vals = results_df[col].dropna().to_numpy(dtype=float)
+        if len(vals) == 0:
+            continue
+
+        fig = plt.figure(figsize=(6, 4))
+        plt.hist(vals, bins=30)
+        plt.xlabel(col)
+        plt.ylabel("Count")
+        plt.title(title)
+        plt.grid(True, alpha=0.3)
+
+        save_path = save_dir / f"validation_abm_to_surrogate_hist_{col}.png"
+        _save_fig(fig, save_path)
+
+        if show:
+            plt.show()
+
+
+def _parity_plot(
+    x: np.ndarray,
+    y: np.ndarray,
+    *,
+    xlabel: str,
+    ylabel: str,
+    title: str,
+    save_path: Path,
+    show: bool = False,
+) -> None:
+    mask = np.isfinite(x) & np.isfinite(y)
+    x = x[mask]
+    y = y[mask]
+
+    if len(x) == 0:
+        return
+
+    lo = min(float(np.min(x)), float(np.min(y)))
+    hi = max(float(np.max(x)), float(np.max(y)))
+
+    fig = plt.figure(figsize=(5.5, 5.0))
+    plt.scatter(x, y, alpha=0.65)
+    plt.plot([lo, hi], [lo, hi], linestyle="--")
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.title(title)
+    plt.xlim(lo, hi)
+    plt.ylim(lo, hi)
+    plt.grid(True, alpha=0.3)
+
+    _save_fig(fig, save_path)
+
+    if show:
+        plt.show()
+
+
+def plot_parity_figures(
+    results_df: pd.DataFrame,
+    *,
+    save_dir: Path,
+    show: bool = False,
+) -> None:
+    parity_specs = [
+        (
+            "final_abm_adoption",
+            "final_surrogate_adoption",
+            "ABM final adoption",
+            "Surrogate final adoption",
+            "Parity plot: final adoption",
+            save_dir / "validation_abm_to_surrogate_parity_adoption.png",
+        ),
+        (
+            "final_abm_quiet_share",
+            "final_surrogate_quiet_share",
+            "ABM final quiet share",
+            "Surrogate final quiet share",
+            "Parity plot: final quiet share",
+            save_dir / "validation_abm_to_surrogate_parity_quiet_share.png",
+        ),
+        (
+            "final_abm_loud_share",
+            "final_surrogate_loud_share",
+            "ABM final loud share",
+            "Surrogate final loud share",
+            "Parity plot: final loud share",
+            save_dir / "validation_abm_to_surrogate_parity_loud_share.png",
+        ),
+    ]
+
+    for xcol, ycol, xlabel, ylabel, title, save_path in parity_specs:
+        _parity_plot(
+            results_df[xcol].to_numpy(dtype=float),
+            results_df[ycol].to_numpy(dtype=float),
+            xlabel=xlabel,
+            ylabel=ylabel,
+            title=title,
+            save_path=save_path,
+            show=show,
+        )
+
+
+def plot_example_overlays(
+    base_dir: Path,
+    model_names: list[str],
+    *,
+    surrogate_path: str | Path | None = None,
+    simulation_dt: float = 1.0,
+    save_dir: Path,
+    show: bool = False,
+) -> None:
+    states_dir = base_dir / "states"
+    settings_path = base_dir / "settings.csv"
+
+    surrogate_model = load_surrogate_model(
+        Path(surrogate_path) if surrogate_path is not None else None
+    )
+
+    for model_name in model_names:
+        df = _load_states_df(states_dir, model_name)
+        settings_row = _load_settings_row(settings_path, model_name)
+
+        Q_surrogate, rates_surrogate = predict_generator(
+            surrogate_model,
+            teams_num=float(settings_row["teams_num"]),
+            teams_size=float(settings_row["teams_size"]),
+            agents_average_initial_opinion=float(settings_row["agents_average_initial_opinion"]),
+            technology_success_rate=float(settings_row["technology_success_rate"]),
+        )
+
+        t = df["t"].to_numpy(dtype=float)
+        abm = _extract_abm_array(df)
+        surrogate = _simulate_ode_fractions(
+            Q_surrogate,
+            abm[0].copy(),
+            len(df),
+            dt=simulation_dt,
+        )
+
+        fig = plt.figure(figsize=(7, 4.5))
+        ax = plt.gca()
+
+        line_S = ax.plot(t, abm[:, 0], label="S (ABM)")[0]
+        line_Q = ax.plot(t, abm[:, 1], label="Q (ABM)")[0]
+        line_L = ax.plot(t, abm[:, 2], label="L (ABM)")[0]
+        line_B = ax.plot(t, abm[:, 3], label="B (ABM)")[0]
+
+        colors = {
+            "S": line_S.get_color(),
+            "Q": line_Q.get_color(),
+            "L": line_L.get_color(),
+            "B": line_B.get_color(),
+        }
+
+        ax.plot(t, surrogate[:, 0], "--", color=colors["S"], label="S (Surrogate)")
+        ax.plot(t, surrogate[:, 1], "--", color=colors["Q"], label="Q (Surrogate)")
+        ax.plot(t, surrogate[:, 2], "--", color=colors["L"], label="L (Surrogate)")
+        ax.plot(t, surrogate[:, 3], "--", color=colors["B"], label="B (Surrogate)")
+
+        ax.set_xlabel("Time step (t)")
+        ax.set_ylabel("Agent ratio")
+        ax.set_title(f"ABM vs surrogate — {model_name}")
+        ax.set_ylim(0.0, 1.0)
+        ax.grid(True, alpha=0.3)
+        ax.legend(ncol=2)
+
+        save_path = save_dir / "validation_abm_to_surrogate" /f"validation_abm_to_surrogate_overlay_{model_name}.png"
+        _save_fig(fig, save_path)
+
+        if show:
+            plt.show()
+
+
+def pick_example_models(
+    results_df: pd.DataFrame,
+    *,
+    n_best: int = 1,
+    n_median: int = 1,
+    n_worst: int = 1,
+) -> list[str]:
+    """
+    Pick example models based on trajectory RMSE:
+        - best fit(s)
+        - median fit(s)
+        - worst fit(s)
+    """
+    df = results_df.sort_values("trajectory_rmse").reset_index(drop=True)
+    chosen: list[str] = []
+
+    if len(df) == 0:
+        return chosen
+
+    if n_best > 0:
+        chosen.extend(df.head(n_best)["model_name"].astype(str).tolist())
+
+    if n_median > 0:
+        mid = len(df) // 2
+        half = n_median // 2
+        start = max(0, mid - half)
+        end = min(len(df), start + n_median)
+        chosen.extend(df.iloc[start:end]["model_name"].astype(str).tolist())
+
+    if n_worst > 0:
+        chosen.extend(df.tail(n_worst)["model_name"].astype(str).tolist())
+
+    # preserve order, remove duplicates
+    seen = set()
+    unique = []
+    for x in chosen:
+        if x not in seen:
+            unique.append(x)
+            seen.add(x)
+    return unique
+
+
+def run_validation(
+    *,
+    base_dir: Path = BASE_DIR,
+    surrogate_path: str | Path | None = None,
+    results_csv_name: str = "validation_abm_to_surrogate.csv",
+    min_adoption_for_composition: float = 1e-3,
+    simulation_dt: float = 1.0,
+    make_histograms: bool = True,
+    make_parity_plots: bool = True,
+    make_example_overlays: bool = True,
+    n_best_examples: int = 1,
+    n_median_examples: int = 1,
+    n_worst_examples: int = 1,
+    show: bool = False,
+    verbose: bool = True,
+) -> pd.DataFrame:
+    figures_dir = base_dir / "figures"
+
+    results_df = evaluate_all_models(
+        base_dir,
+        surrogate_path=surrogate_path,
+        min_adoption_for_composition=min_adoption_for_composition,
+        simulation_dt=simulation_dt,
+        verbose=verbose,
+    )
+
+    results_csv_path = base_dir / results_csv_name
+    results_df.to_csv(results_csv_path, index=False)
+    print(f"\nSaved per-model validation results to: {results_csv_path}")
+
+    print_summary_table(results_df)
+
+    if make_histograms:
+        plot_error_histograms(results_df, save_dir=figures_dir, show=show)
+        print("Saved histogram figures.")
+
+    if make_parity_plots:
+        plot_parity_figures(results_df, save_dir=figures_dir, show=show)
+        print("Saved parity figures.")
+
+    if make_example_overlays:
+        example_models = pick_example_models(
+            results_df,
+            n_best=n_best_examples,
+            n_median=n_median_examples,
+            n_worst=n_worst_examples,
+        )
+        if example_models:
+            plot_example_overlays(
+                base_dir,
+                example_models,
+                surrogate_path=surrogate_path,
+                simulation_dt=simulation_dt,
+                save_dir=figures_dir,
+                show=show,
+            )
+            print(f"Saved overlay figures for examples: {example_models}")
+
+    return results_df
+
+
+if __name__ == "__main__":
+    run_validation(
+        base_dir=BASE_DIR,
+        surrogate_path=None,   # or BASE_DIR / "models" / "your_surrogate.pkl"
+        #results_csv_name="validation_abm_to_surrogate.csv",
+        min_adoption_for_composition=0.05,
+        simulation_dt=1.0,
+        make_histograms=True,
+        make_parity_plots=True,
+        make_example_overlays=True,
+        n_best_examples=1,
+        n_median_examples=1,
+        n_worst_examples=1,
+        show=False,
+        verbose=True,
+    )

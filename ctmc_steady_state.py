@@ -1,3 +1,26 @@
+"""
+CTMC steady-state utilities used across the SQLB reduction pipeline.
+
+What this module does:
+1. Validates a fitted/predicted CTMC generator matrix Q.
+2. Finds closed communicating classes and transient states.
+3. Computes class-level stationary distributions and absorption weights.
+4. Returns the long-run state composition:
+       x_inf = lim_{t->infinity} x0 expm(Q t)
+
+How it is used in the pipeline:
+- `steady_state_fitted_ode.py`:
+  Converts each fitted ODE generator in `odes/*.npz` + model-specific x0
+  into steady-state SQLB ratios and writes `steady_states.csv`.
+- `steady_state_surrogate_ode.py`:
+  Uses surrogate-predicted generators + x0 to estimate steady-state SQLB ratios.
+- Validation scripts (`validate_surrogate.py`, `validate_surrogate_steady_state.py`):
+  Compare surrogate steady-state reconstruction against fitted-ODE steady states.
+
+This module is the core Markov-chain long-run solver for all steady-state results
+reported downstream (plots, CSV summaries, and paper metrics).
+"""
+
 from __future__ import annotations
 
 from typing import List

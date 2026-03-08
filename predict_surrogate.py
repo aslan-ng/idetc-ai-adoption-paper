@@ -1,4 +1,21 @@
-# predict_surrogate.py
+"""
+Predict reduced-order CTMC dynamics from the trained surrogate model.
+
+What this file does:
+1. Loads the saved polynomial surrogate (`surrogates/ode_rate_surrogate.npz`).
+2. Rebuilds the same standardized polynomial feature vector used in training.
+3. Predicts off-diagonal SQLB transition rates and converts them to a valid
+   generator matrix Q.
+4. Computes steady-state SQLB ratios from Q.
+
+How it is used in the pipeline:
+- Called by analysis/plot scripts to map scenario inputs
+  (`teams_num`, `teams_size`, `agents_average_initial_opinion`,
+  `technology_success_rate`) to predicted ODE behavior.
+- Provides the core prediction interface used for threshold plots, composition
+  plots, and surrogate steady-state validation in the IDETC study.
+"""
+
 from __future__ import annotations
 
 from itertools import combinations_with_replacement

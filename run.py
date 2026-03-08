@@ -1,3 +1,19 @@
+"""
+Run the ABM simulations for all settings and save model artifacts.
+
+What this file does:
+1. Loads the experiment grid from `settings.csv`.
+2. Builds one organization + technology instance per setting (seeded).
+3. Runs the TrustDynamics model for configured `steps`.
+4. Saves each simulation to `models/{name}.json`.
+5. Executes in parallel with a process pool and skips existing outputs.
+
+How it is used in the pipeline:
+- Core simulation stage after `config.py` generates settings.
+- Produces the model files that downstream scripts use to compute state
+  trajectories, fit ODEs, and generate validation/analysis figures.
+"""
+
 import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
 

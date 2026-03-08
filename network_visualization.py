@@ -1,3 +1,18 @@
+"""
+Network visualization utility for the ABM organization structure.
+
+What this file does:
+1. Extracts team-level and agent-level connectivity from a model.
+2. Lays out teams as non-overlapping circles and places agents inside each team.
+3. Draws team links, intra-team agent links, and optional cross-team links.
+4. Produces publication-ready network figures saved to `figures/`.
+
+How it is used in the pipeline:
+- After ABM runs are created, this script is used to generate representative
+  structural snapshots of the organization network (Step 3 in README).
+- These figures support interpretation of the simulation setup in the IDETC paper.
+"""
+
 import math
 import random
 import itertools

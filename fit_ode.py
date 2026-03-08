@@ -52,6 +52,7 @@ Batch mode:
         - final adoption computation from ODE surrogate
         - tradeoff contour / decision-framework analysis
 """
+
 from __future__ import annotations
 import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
