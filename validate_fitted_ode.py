@@ -25,7 +25,7 @@ Expected files:
     - settings.csv
 
 Outputs:
-    - figures/validation_abm_to_ode/validation_abm_to_ode_*.png
+    - figures/validation_abm_to_ode/validation_abm_to_ode_*.pdf
     - (Optional) validation_abm_to_ode.csv
 """
 
@@ -292,7 +292,7 @@ def plot_error_histograms(
         plt.title(title)
         plt.grid(True, alpha=0.3)
 
-        save_path = save_dir / f"validation_abm_to_ode_hist_{col}.png"
+        save_path = save_dir / f"validation_abm_to_ode_hist_{col}.pdf"
         _save_fig(fig, save_path)
 
         if show:
@@ -348,7 +348,7 @@ def plot_parity_figures(
             "ABM final adoption",
             "ODE final adoption",
             "Parity plot: final adoption",
-            save_dir / "validation_abm_to_ode_parity_adoption.png",
+            save_dir / "validation_abm_to_ode_parity_adoption.pdf",
         ),
         (
             "final_abm_quiet_share",
@@ -356,7 +356,7 @@ def plot_parity_figures(
             "ABM final quiet share",
             "ODE final quiet share",
             "Parity plot: final quiet share",
-            save_dir / "validation_abm_to_ode_parity_quiet_share.png",
+            save_dir / "validation_abm_to_ode_parity_quiet_share.pdf",
         ),
         (
             "final_abm_loud_share",
@@ -364,7 +364,7 @@ def plot_parity_figures(
             "ABM final loud share",
             "ODE final loud share",
             "Parity plot: final loud share",
-            save_dir / "validation_abm_to_ode_parity_loud_share.png",
+            save_dir / "validation_abm_to_ode_parity_loud_share.pdf",
         ),
     ]
 
@@ -423,7 +423,7 @@ def plot_example_overlays(
         ax.grid(True, alpha=0.3)
         ax.legend(ncol=2)
 
-        save_path = save_dir / f"validation_abm_to_ode_overlay_{model_name}.png"
+        save_path = save_dir / f"validation_abm_to_ode_overlay_{model_name}.pdf"
         _save_fig(fig, save_path)
 
         if show:
@@ -495,7 +495,7 @@ def run_validation(
     )
 
     if results_csv_name is not None:
-        results_csv_path = base_dir / results_csv_name
+        results_csv_path = figures_dir / results_csv_name
         results_df.to_csv(results_csv_path, index=False)
         print(f"\nSaved per-model validation results to: {results_csv_path}")
 

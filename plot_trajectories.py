@@ -308,6 +308,6 @@ if __name__ == "__main__":
     ]
 
     for i, model_name in enumerate(model_names):
-        plot_sqlb_states(BASE_DIR, model_name, show=False, save_path=BASE_DIR / "figures" / f"abm_example_{i+1}.png")
-        plot_sqlb_states_vs_ode(BASE_DIR, model_name, show=False, save_path=BASE_DIR / "figures" / f"abm_ode_example_{i+1}.png")
-        plot_sqlb_states_vs_surrogate(BASE_DIR, model_name, show=False, save_path=BASE_DIR / "figures" / f"abm_surrogate_example_{i+1}.png")
+        plot_sqlb_states(BASE_DIR, model_name, show=False, save_path=BASE_DIR / "figures" / f"abm_example_{i+1}.pdf")
+        plot_sqlb_states_vs_ode(BASE_DIR, model_name, show=False, save_path=BASE_DIR / "figures" / f"abm_ode_example_{i+1}.pdf")
+        plot_sqlb_states_vs_surrogate(BASE_DIR, model_name, show=False, save_path=BASE_DIR / "figures" / f"abm_surrogate_example_{i+1}.pdf")

@@ -289,6 +289,8 @@ if __name__ == "__main__":
 
     configs = [
         ("2_12_6_3_2", "network_example_1"),
+        ("2_12_6_2_0", "network_example_2"),
+        ("2_12_6_2_1", "network_example_3"),
     ]
 
     for model_name, filename in configs:
@@ -300,7 +302,7 @@ if __name__ == "__main__":
             team_scale=1
         )
 
-        save_path = BASE_DIR / "figures" / f"{filename}.png"
+        save_path = BASE_DIR / "figures" / f"{filename}.pdf"
         fig.savefig(save_path, dpi=300, bbox_inches="tight")
         plt.close(fig)
 

@@ -36,7 +36,6 @@ def predict_adoption_composition(
     agents_average_initial_opinion: float,
     technology_success_rate: float,
     surrogate_path: Path | None = None,
-    min_adoption_for_composition: float = 0.001,
 ) -> dict[str, float]:
     out = predict_full_surrogate_output(
         teams_num=teams_num,
@@ -53,14 +52,11 @@ def predict_adoption_composition(
     L = float(ss["L"])
     B = float(ss["B"])
 
-    adoption = Q + L
+    total = S + Q + L + B
 
-    if adoption < min_adoption_for_composition:
-        quiet_share = np.nan
-        loud_share = np.nan
-    else:
-        quiet_share = Q / adoption
-        loud_share = L / adoption
+    adoption = (Q + L) / total
+    quiet_share = Q / total
+    loud_share = L / total
 
     return {
         "S": S,
@@ -78,7 +74,6 @@ def plot_loud_share_grid(
     surrogate_path: Path | None = None,
     accuracy_min: float = 0.5,
     accuracy_max: float = 1.0,
-    min_adoption_for_composition: float = 0.001,
     save_name: str = "figure_loud_share_grid.png",
 ) -> None:
     accuracy_grid = np.linspace(accuracy_min, accuracy_max, 201)
@@ -112,7 +107,6 @@ def plot_loud_share_grid(
                     agents_average_initial_opinion=float(opinion),
                     technology_success_rate=float(acc),
                     surrogate_path=surrogate_path,
-                    min_adoption_for_composition=min_adoption_for_composition,
                 )
 
                 loud_share_list.append(res["loud_share"])
@@ -129,7 +123,7 @@ def plot_loud_share_grid(
                 linewidth=2.0,
                 linestyle="--",
                 color="#E69F00",        # orange
-                label="Loud share",
+                label="Loud adopters",
             )
             ax.plot(
                 accuracy_grid,
@@ -137,7 +131,7 @@ def plot_loud_share_grid(
                 linewidth=2.0,
                 linestyle="--",
                 color="#0072B2",        # blue
-                label="Quiet share",
+                label="Quiet adopters",
             )
             ax.plot(
                 accuracy_grid,
@@ -175,7 +169,7 @@ def plot_loud_share_grid(
     fig.suptitle(
         "Adoption composition vs AI accuracy",
         fontsize=16,
-        y=0.95,
+        y=0.92,
     )
 
     # shared legend at bottom
@@ -186,7 +180,7 @@ def plot_loud_share_grid(
         loc="lower center",
         ncol=3,
         frameon=False,
-        bbox_to_anchor=(0.5, -0.01),
+        bbox_to_anchor=(0.5, 0.02),
     )
 
     plt.tight_layout(rect=[0.06, 0.06, 1, 0.93])
@@ -197,4 +191,4 @@ def plot_loud_share_grid(
 
 
 if __name__ == "__main__":
-    plot_loud_share_grid(min_adoption_for_composition=0.05)
+    plot_loud_share_grid(save_name="figure_loud_share_grid.pdf")

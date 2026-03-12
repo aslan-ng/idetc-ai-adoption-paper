@@ -292,7 +292,7 @@ def plot_model_selection_results(result_df, base_dir):
     plt.tight_layout()
 
     plt.savefig(
-        fig_dir / "surrogate_model_selection.png",
+        fig_dir / "surrogate_model_selection.pdf",
         dpi=300,
         bbox_inches="tight"
     )
