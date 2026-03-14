@@ -27,7 +27,19 @@ import pandas as pd
 
 from utils import BASE_DIR
 
+PLOT_STYLE = {
+    "fig_width": 6,
+    "fig_height": 4,
 
+    "title_fontsize": 17,
+    "axis_label_fontsize": 15,
+    "tick_fontsize": 13,
+    "legend_fontsize": 13,
+
+    "line_width": 2.0,
+    "marker_size": 6,
+    "capsize": 4,
+}
 STATE_ORDER = ["S", "Q", "L", "B"]
 BASE_INPUT_COLUMNS = [
     "teams_num",
@@ -252,10 +264,9 @@ def compare_polynomial_degrees(
     result_df = pd.DataFrame(results).sort_values("degree").reset_index(drop=True)
     return result_df
 
-def plot_model_selection_results(result_df, base_dir):
+def plot_model_selection_results(result_df, base_dir, style=PLOT_STYLE):
     """
     Plot training vs cross-validation RMSE with CV error bars.
-    Saves a single figure for the paper.
     """
 
     fig_dir = base_dir / "figures"
@@ -263,38 +274,48 @@ def plot_model_selection_results(result_df, base_dir):
 
     deg = result_df["degree"]
 
-    plt.figure(figsize=(6,4))
+    plt.figure(
+        figsize=(style["fig_width"], style["fig_height"])
+    )
 
     # Training curve
     plt.plot(
         deg,
         result_df["train_rmse"],
         marker="o",
+        markersize=style["marker_size"],
+        linewidth=style["line_width"],
         label="Train RMSE",
     )
 
-    # CV curve with error bars
+    # CV curve
     plt.errorbar(
         deg,
         result_df["cv_rmse_mean"],
         yerr=result_df["cv_rmse_std"],
         marker="o",
-        capsize=4,
+        markersize=style["marker_size"],
+        linewidth=style["line_width"],
+        capsize=style["capsize"],
         label="CV RMSE",
     )
 
-    plt.xlabel("Polynomial Degree")
-    plt.ylabel("RMSE")
-    plt.title("Training vs Validation Error")
-    plt.legend()
-    plt.grid(True)
+    plt.xlabel("Polynomial Degree", fontsize=style["axis_label_fontsize"])
+    plt.ylabel("RMSE", fontsize=style["axis_label_fontsize"])
+    plt.title("Training vs. Validation Error", fontsize=style["title_fontsize"])
+
+    plt.xticks(fontsize=style["tick_fontsize"])
+    plt.yticks(fontsize=style["tick_fontsize"])
+
+    plt.legend(fontsize=style["legend_fontsize"])
+    plt.grid(True, alpha=0.3)
 
     plt.tight_layout()
 
     plt.savefig(
         fig_dir / "surrogate_model_selection.pdf",
         dpi=300,
-        bbox_inches="tight"
+        bbox_inches="tight",
     )
 
     plt.close()

@@ -297,17 +297,183 @@ def plot_sqlb_states_vs_surrogate(
 
     return df, surrogate_ode, Q_surrogate, settings_row
 
+def plot_sqlb_states_vs_ode_two_examples(
+    base_dir: Path,
+    model_names: list[str] | tuple[str, str],
+    *,
+    subplot_titles: list[str] | tuple[str, str] = ("Failed adoption", "Successful adoption"),
+    figure_title: str = "ABM vs. fitted ODE examples",
+    show: bool = True,
+    save_path: str | Path | None = None,
+    fig_width: float = 12.0,
+    fig_height: float = 4.8,
+    title_fontsize: float = 16,
+    subplot_title_fontsize: float = 14,
+    axis_label_fontsize: float = 13,
+    tick_fontsize: float = 11,
+    legend_fontsize: float = 10,
+    linewidth_abm: float = 2.0,
+    linewidth_ode: float = 2.0,
+    legend_ncol: int = 2,
+):
+    """
+    Plot two ABM-vs-fitted-ODE examples in a 1x2 grid.
+
+    Parameters
+    ----------
+    model_names
+        Exactly two model names, e.g. ["2_9_10_2_3", "2_12_6_3_2"].
+    subplot_titles
+        Titles for left and right subplots.
+    figure_title
+        Global figure title.
+    Font/size parameters are exposed for iterative tuning.
+    """
+    if len(model_names) != 2:
+        raise ValueError("model_names must contain exactly two model names.")
+
+    if len(subplot_titles) != 2:
+        raise ValueError("subplot_titles must contain exactly two titles.")
+
+    states_dir = base_dir / "states"
+    odes_dir = base_dir / "odes"
+
+    fig, axes = plt.subplots(1, 2, figsize=(fig_width, fig_height), sharey=True)
+
+    desired = ["S", "Q", "L", "B"]
+
+    for ax, model_name, subtitle in zip(axes, model_names, subplot_titles):
+        df = _load_states_df(states_dir, model_name)
+        Q, dt_fit, state_order = _load_Q_npz(odes_dir, model_name)
+
+        if list(state_order) != desired:
+            idx = {s: i for i, s in enumerate(state_order)}
+            perm = [idx[s] for s in desired]
+            Q = Q[np.ix_(perm, perm)]
+
+        T = len(df)
+        t = df["t"].to_numpy()
+
+        x0 = np.array(
+            [
+                df.loc[0, "ratio_S"],
+                df.loc[0, "ratio_Q"],
+                df.loc[0, "ratio_L"],
+                df.loc[0, "ratio_B"],
+            ],
+            dtype=float,
+        )
+        ode = _simulate_ode_fractions(Q, x0, T, dt=dt_fit)
+
+        # Plot ABM first so ODE can reuse colors
+        line_S = ax.plot(t, df["ratio_S"], linewidth=linewidth_abm, label="S (ABM)")[0]
+        line_Q = ax.plot(t, df["ratio_Q"], linewidth=linewidth_abm, label="Q (ABM)")[0]
+        line_L = ax.plot(t, df["ratio_L"], linewidth=linewidth_abm, label="L (ABM)")[0]
+        line_B = ax.plot(t, df["ratio_B"], linewidth=linewidth_abm, label="B (ABM)")[0]
+
+        colors = {
+            "S": line_S.get_color(),
+            "Q": line_Q.get_color(),
+            "L": line_L.get_color(),
+            "B": line_B.get_color(),
+        }
+
+        ax.plot(
+            t, ode[:, 0],
+            linestyle="--",
+            linewidth=linewidth_ode,
+            color=colors["S"],
+            label="S (ODE)",
+        )
+        ax.plot(
+            t, ode[:, 1],
+            linestyle="--",
+            linewidth=linewidth_ode,
+            color=colors["Q"],
+            label="Q (ODE)",
+        )
+        ax.plot(
+            t, ode[:, 2],
+            linestyle="--",
+            linewidth=linewidth_ode,
+            color=colors["L"],
+            label="L (ODE)",
+        )
+        ax.plot(
+            t, ode[:, 3],
+            linestyle="--",
+            linewidth=linewidth_ode,
+            color=colors["B"],
+            label="B (ODE)",
+        )
+
+        # Make only the second subplot title bold
+        title_weight = "bold"
+
+        ax.set_title(
+            subtitle,
+            fontsize=subplot_title_fontsize,
+            fontweight=title_weight,
+        )
+        ax.set_xlabel("Time step (t)", fontsize=axis_label_fontsize)
+        ax.set_ylim(0, 1)
+        ax.set_xlim(0, 100)
+        ax.set_xticks([0, 25, 50, 75, 100])
+        ax.grid(True, alpha=0.3)
+        ax.tick_params(axis="both", labelsize=tick_fontsize)
+
+    handles, labels = axes[1].get_legend_handles_labels()
+
+    axes[1].legend(
+        handles,
+        labels,
+        fontsize=legend_fontsize,
+        ncol=legend_ncol,
+    )
+
+    axes[0].set_ylabel("Agent ratio", fontsize=axis_label_fontsize)
+
+    fig.suptitle(figure_title, fontsize=title_fontsize, y=0.9)
+    plt.tight_layout(rect=[0, 0, 1, 0.94])
+
+    if save_path is not None:
+        save_path = Path(save_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(save_path, bbox_inches="tight", dpi=400)
+
+    if show:
+        plt.show()
+
+    return fig, axes
+
 
 if __name__ == "__main__":
-
     # Example model list for quick figure generation.
-    model_names = [
-        "2_12_6_3_2",
+    #model_names = [
+        #"2_12_6_3_2",
+        #"2_17_9_3_1",
+        #"2_9_10_2_3",
         #"4_15_7_5_0",
         #"1_13_8_4_0"
-    ]
+    #]
 
-    for i, model_name in enumerate(model_names):
-        plot_sqlb_states(BASE_DIR, model_name, show=False, save_path=BASE_DIR / "figures" / f"abm_example_{i+1}.pdf")
-        plot_sqlb_states_vs_ode(BASE_DIR, model_name, show=False, save_path=BASE_DIR / "figures" / f"abm_ode_example_{i+1}.pdf")
-        plot_sqlb_states_vs_surrogate(BASE_DIR, model_name, show=False, save_path=BASE_DIR / "figures" / f"abm_surrogate_example_{i+1}.pdf")
+    #for i, model_name in enumerate(model_names):
+        #plot_sqlb_states(BASE_DIR, model_name, show=False, save_path=BASE_DIR / "figures" / f"abm_example_{i+1}.pdf")
+        #plot_sqlb_states_vs_ode(BASE_DIR, model_name, show=False, save_path=BASE_DIR / "figures" / f"abm_ode_example_{i+1}.pdf")
+        #plot_sqlb_states_vs_surrogate(BASE_DIR, model_name, show=False, save_path=BASE_DIR / "figures" / f"abm_surrogate_example_{i+1}.pdf")
+
+    plot_sqlb_states_vs_ode_two_examples(
+        BASE_DIR,
+        model_names=["2_9_10_2_3", "2_12_6_3_2"],
+        subplot_titles=["Successful adoption", "Failed adoption"],
+        figure_title="ABM vs. fitted CTMC/ODE examples",
+        show=False,
+        save_path=BASE_DIR / "figures" / "abm_ode_two_examples.pdf",
+        fig_width=8.0,
+        fig_height=4.8,
+        title_fontsize=17,
+        subplot_title_fontsize=15,
+        axis_label_fontsize=14,
+        tick_fontsize=12,
+        legend_fontsize=11,
+    )

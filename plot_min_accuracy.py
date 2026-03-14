@@ -31,13 +31,14 @@ from utils import BASE_DIR
 # ---- Global plotting style for publication figures ----
 plt.rcParams.update({
     "font.size": 15,
-    "axes.titlesize": 15,
-    "axes.labelsize": 15,
-    "xtick.labelsize": 12,
-    "ytick.labelsize": 12,
+    "axes.titlesize": 13,
+    "axes.labelsize": 16,
+    "xtick.labelsize": 13,
+    "ytick.labelsize": 13,
     "legend.fontsize": 15,
     "figure.titlesize": 17,
 })
+HEATMAP_FONT_SIZE = 11
 
 FIGURES_DIR = BASE_DIR / "figures"
 FIGURES_DIR.mkdir(parents=True, exist_ok=True)
@@ -342,7 +343,7 @@ def plot_min_accuracy_two_panel(
     threshold = (color_min + color_max) / 2.0
 
     for ax, Z, subtitle in zip(axes, grids, subplot_titles):
-        ax.set_title(subtitle)
+        ax.set_title(subtitle, fontweight="bold")
         ax.set_xticks(range(len(teams_size_list)))
         ax.set_xticklabels(teams_size_list)
         ax.set_yticks(range(len(teams_num_list)))
@@ -360,7 +361,7 @@ def plot_min_accuracy_two_panel(
                     label,
                     ha="center",
                     va="center",
-                    fontsize=10,
+                    fontsize=HEATMAP_FONT_SIZE,
                     color=text_color,
                 )
 
@@ -371,12 +372,11 @@ def plot_min_accuracy_two_panel(
         cax=cbar_ax,
         ticks=np.arange(0.6, 1.01, 0.1),
     )
-    cbar.set_label("Minimum required AI accuracy", fontsize=13)
+    cbar.set_label("Minimum Required AI Accuracy")
 
     fig.suptitle(
         "Minimum AI accuracy for 50% adoption",
-        fontsize=16,
-        y=0.95,
+        y=0.94,
     )
 
     if save_name is not None:
