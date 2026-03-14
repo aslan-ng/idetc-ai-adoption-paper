@@ -6,7 +6,7 @@ What this file does:
 2. Computes adoption composition shares:
    - loud share  = L / (Q + L)
    - quiet share = Q / (Q + L)
-3. Builds a configurable grid across organization size and initial opinion.
+3. Builds a 2x2 comparison grid across organization size and initial opinion.
 4. Saves a publication-ready figure to `figures/`.
 
 How it is used in the pipeline:
@@ -32,7 +32,7 @@ FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 # Figure style settings
 # Change fonts here only
 # =========================
-FIG_WIDTH = 15
+FIG_WIDTH = 11
 FIG_HEIGHT = 7
 
 FONT_TITLE = 16
@@ -90,63 +90,36 @@ def predict_adoption_composition(
     }
 
 
-def plot_adoption_composition_grid(
+def plot_loud_share_grid(
     *,
-    org_configs: list[tuple[int, int]] | None = None,
-    initial_opinions: list[float] | None = None,
     surrogate_path: Path | None = None,
-    row_labels: list[str] | None = None,
-    column_titles: list[str] | None = None,
     accuracy_min: float = 0.5,
     accuracy_max: float = 1.0,
-    n_accuracy_points: int = 201,
-    save_name: str = "figure_loud_share_grid.pdf",
+    save_name: str = "figure_loud_share_grid.png",
 ) -> None:
-    """
-    Parameters
-    ----------
-    org_configs
-        List of (teams_num, teams_size) tuples, one per column.
-        Example: [(5, 5), (15, 15), (25, 25)]
-    initial_opinions
-        List of initial opinion values, one per row.
-        Example: [-0.25, 0.25]
-    """
-    if org_configs is None:
-        org_configs = [(5, 5), (15, 15), (25, 25)]
+    accuracy_grid = np.linspace(accuracy_min, accuracy_max, 201)
 
-    if initial_opinions is None:
-        initial_opinions = [-0.25, 0.25]
-
-    n_rows = len(initial_opinions)
-    n_cols = len(org_configs)
-
-    accuracy_grid = np.linspace(accuracy_min, accuracy_max, n_accuracy_points)
+    # rows = initial opinion, cols = organization size
+    configs = [
+        [(-0.25, 5, 5), (-0.25, 20, 20)],
+        [(0.25, 5, 5), (0.25, 20, 20)],
+    ]
 
     fig, axes = plt.subplots(
-        n_rows,
-        n_cols,
+        2,
+        2,
         figsize=(FIG_WIDTH, FIG_HEIGHT),
         sharex=True,
         sharey=True,
-        squeeze=False,
     )
 
-    if column_titles is None:
-        column_titles = [
-            f"{teams_num} teams, size {teams_size}"
-            for teams_num, teams_size in org_configs
-        ]
+    column_titles = ["Small organization", "Large organization"]
+    row_labels = ["Negative initial opinion", "Positive initial opinion"]
 
-    if row_labels is None:
-        row_labels = [
-            f"Initial opinion = {opinion:+.2f}"
-            for opinion in initial_opinions
-        ]
-
-    for r, opinion in enumerate(initial_opinions):
-        for c, (teams_num, teams_size) in enumerate(org_configs):
+    for r in range(2):
+        for c in range(2):
             ax = axes[r, c]
+            opinion, teams_num, teams_size = configs[r][c]
 
             loud_share_list = []
             quiet_share_list = []
@@ -203,42 +176,46 @@ def plot_adoption_composition_grid(
                 ax.set_title(
                     column_titles[c],
                     fontsize=FONT_SUBTITLE,
-                    pad=14,
+                    pad=20,
                     fontweight="bold",
                 )
 
-            if r == n_rows - 1:
-                ax.set_xlabel("AI accuracy", fontsize=FONT_AXIS_LABEL)
+    # Shared axis labels
+    axes[1, 0].set_xlabel("AI accuracy", fontsize=FONT_AXIS_LABEL)
+    axes[1, 1].set_xlabel("AI accuracy", fontsize=FONT_AXIS_LABEL)
+    axes[0, 0].set_ylabel("Share", fontsize=FONT_AXIS_LABEL)
+    axes[1, 0].set_ylabel("Share", fontsize=FONT_AXIS_LABEL)
 
-            if c == 0:
-                ax.set_ylabel("Share", fontsize=FONT_AXIS_LABEL)
-
-    # Row labels on the left side
-    # Positions are spaced automatically based on number of rows
-    # Apply layout first so axis positions are final
-    plt.tight_layout(rect=[0.08, 0.08, 1, 0.94])
-
-    # Row labels aligned to the true vertical centers of each row
-    for r, label in enumerate(row_labels):
-        pos = axes[r, 0].get_position()
-        y = 0.47 * (pos.y0 + pos.y1)
-        fig.text(
-            0.03,
-            y,
-            label,
-            va="center",
-            ha="center",
-            rotation=90,
-            fontsize=FONT_ROW_LABEL,
-            fontweight="bold",
-        )
-
-    fig.suptitle(
-        "Adoption Composition vs. AI accuracy",
-        fontsize=FONT_TITLE,
-        y=0.95,
+    # Add row labels on the left side
+    fig.text(
+        0.04,
+        0.65,
+        row_labels[0],
+        va="center",
+        ha="left",
+        rotation=90,
+        fontsize=FONT_ROW_LABEL,
+        fontweight="bold",
+    )
+    fig.text(
+        0.04,
+        0.28,
+        row_labels[1],
+        va="center",
+        ha="left",
+        rotation=90,
+        fontsize=FONT_ROW_LABEL,
+        fontweight="bold",
     )
 
+    # Global title
+    fig.suptitle(
+        "Adoption composition vs AI accuracy",
+        fontsize=FONT_TITLE,
+        y=0.92,
+    )
+
+    # Shared legend at bottom
     handles, labels = axes[0, 0].get_legend_handles_labels()
     fig.legend(
         handles,
@@ -250,7 +227,7 @@ def plot_adoption_composition_grid(
         fontsize=FONT_LEGEND,
     )
 
-    plt.tight_layout(rect=[0.05, 0.08, 1, 0.94])
+    plt.tight_layout(rect=[0.06, 0.06, 1, 0.93])
 
     save_path = FIGURES_DIR / save_name
     plt.savefig(save_path, dpi=400, bbox_inches="tight")
@@ -258,19 +235,4 @@ def plot_adoption_composition_grid(
 
 
 if __name__ == "__main__":
-    plot_adoption_composition_grid(
-        org_configs=[(5, 5), (10, 10), (15, 15), (20, 20)],
-        initial_opinions=[0.3, 0.0, -0.3],
-        save_name="figure_loud_share_grid.pdf",
-        row_labels=[
-            "Positive\ninitial opinion",
-            "Neutral\ninitial opinion",
-            "Negative\ninitial opinion",
-        ],
-        column_titles=[
-            "Small organization\n(5 teams, 5 members each)",
-            "Medium organization\n(10 teams, 10 members each)",
-            "Medium organization\n(15 teams, 15 members each)",
-            "Large organization\n(20 teams, 20 members each)",
-        ]
-    )
+    plot_loud_share_grid(save_name="figure_loud_share_grid.pdf")

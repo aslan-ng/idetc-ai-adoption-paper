@@ -90,7 +90,7 @@ def plot_sqlb_states(base_dir: Path, model_name: str, *, show: bool = True, save
     plt.plot(df["t"], df["ratio_B"], label="B")
 
     plt.xlabel("Time step (t)")
-    plt.ylabel("Agent ratio")
+    plt.ylabel("Population ratio")
     plt.title(f"State Ratios")
     ax = plt.gca()
     ax.set_xticks([0.0])
