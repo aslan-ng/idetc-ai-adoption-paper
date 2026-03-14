@@ -42,6 +42,32 @@ from predict_surrogate import load_surrogate_model, predict_generator
 from utils import BASE_DIR, get_all_model_names
 
 
+# =========================
+# Figure style parameters
+# Edit here to tune visuals
+# =========================
+PLOT_STYLE = {
+    # shared
+    "grid_alpha": 0.3,
+
+    # histogram figures
+    "hist_fig_width": 6.0,
+    "hist_fig_height": 4.0,
+    "hist_title_fontsize": 19,
+    "hist_axis_label_fontsize": 16,
+    "hist_tick_fontsize": 15,
+
+    # overlay figure
+    "overlay_fig_width": 7.0,
+    "overlay_fig_height": 4.5,
+    "overlay_title_fontsize": 14,
+    "overlay_axis_label_fontsize": 12,
+    "overlay_tick_fontsize": 11,
+    "overlay_legend_fontsize": 10,
+    "overlay_linewidth_abm": 2.0,
+    "overlay_linewidth_surrogate": 2.0,
+}
+
 STATE_ORDER = ["S", "Q", "L", "B"]
 
 
@@ -302,6 +328,7 @@ def plot_error_histograms(
     results_df: pd.DataFrame,
     *,
     save_dir: Path,
+    style: dict = PLOT_STYLE,
     show: bool = False,
 ) -> None:
     metrics = [
@@ -318,19 +345,22 @@ def plot_error_histograms(
 
         weights = np.ones_like(vals, dtype=float) / len(vals)
 
-        fig = plt.figure(figsize=(6, 4))
-        plt.hist(vals, bins=30, weights=weights)
-        plt.xlabel(title)
-        plt.ylabel("Share of scenarios")
-        plt.title(title)
-        plt.grid(True, alpha=0.3)
+        fig = plt.figure(
+            figsize=(style["hist_fig_width"], style["hist_fig_height"])
+        )
+        ax = plt.gca()
+
+        ax.hist(vals, bins=30, weights=weights)
+        ax.set_xlabel(title, fontsize=style["hist_axis_label_fontsize"])
+        ax.set_ylabel("Share of scenarios", fontsize=style["hist_axis_label_fontsize"])
+        ax.set_title(title, fontsize=style["hist_title_fontsize"])
+        ax.grid(True, alpha=style["grid_alpha"])
+        ax.tick_params(axis="both", labelsize=style["hist_tick_fontsize"])
 
         if col == "trajectory_rmse":
-            plt.yticks(
-                [0.00, 0.05, 0.10, 0.15],
-                ["0.0", "5%", "10%", "15%"],
-            )
-            plt.ylim(0.0, 0.15)
+            ax.set_yticks([0.00, 0.05, 0.10, 0.15])
+            ax.set_yticklabels(["0.0", "5%", "10%", "15%"])
+            ax.set_ylim(0.0, 0.15)
 
         save_path = save_dir / f"validation_abm_to_surrogate_hist_{col}.pdf"
         _save_fig(fig, save_path)
@@ -346,6 +376,7 @@ def plot_selected_overlay(
     surrogate_path: str | Path | None = None,
     simulation_dt: float = 1.0,
     save_dir: Path,
+    style: dict = PLOT_STYLE,
     show: bool = False,
 ) -> None:
     states_dir = base_dir / "states"
@@ -377,13 +408,31 @@ def plot_selected_overlay(
         dt=simulation_dt,
     )
 
-    fig = plt.figure(figsize=(7, 4.5))
+    fig = plt.figure(
+        figsize=(style["overlay_fig_width"], style["overlay_fig_height"])
+    )
     ax = plt.gca()
 
-    line_S = ax.plot(t, abm[:, 0], label="S (ABM)")[0]
-    line_Q = ax.plot(t, abm[:, 1], label="Q (ABM)")[0]
-    line_L = ax.plot(t, abm[:, 2], label="L (ABM)")[0]
-    line_B = ax.plot(t, abm[:, 3], label="B (ABM)")[0]
+    line_S = ax.plot(
+        t, abm[:, 0],
+        linewidth=style["overlay_linewidth_abm"],
+        label="S (ABM)"
+    )[0]
+    line_Q = ax.plot(
+        t, abm[:, 1],
+        linewidth=style["overlay_linewidth_abm"],
+        label="Q (ABM)"
+    )[0]
+    line_L = ax.plot(
+        t, abm[:, 2],
+        linewidth=style["overlay_linewidth_abm"],
+        label="L (ABM)"
+    )[0]
+    line_B = ax.plot(
+        t, abm[:, 3],
+        linewidth=style["overlay_linewidth_abm"],
+        label="B (ABM)"
+    )[0]
 
     colors = {
         "S": line_S.get_color(),
@@ -392,17 +441,37 @@ def plot_selected_overlay(
         "B": line_B.get_color(),
     }
 
-    ax.plot(t, surrogate[:, 0], "--", color=colors["S"], label="S (Surrogate)")
-    ax.plot(t, surrogate[:, 1], "--", color=colors["Q"], label="Q (Surrogate)")
-    ax.plot(t, surrogate[:, 2], "--", color=colors["L"], label="L (Surrogate)")
-    ax.plot(t, surrogate[:, 3], "--", color=colors["B"], label="B (Surrogate)")
+    ax.plot(
+        t, surrogate[:, 0], "--",
+        linewidth=style["overlay_linewidth_surrogate"],
+        color=colors["S"], label="S (Surrogate)"
+    )
+    ax.plot(
+        t, surrogate[:, 1], "--",
+        linewidth=style["overlay_linewidth_surrogate"],
+        color=colors["Q"], label="Q (Surrogate)"
+    )
+    ax.plot(
+        t, surrogate[:, 2], "--",
+        linewidth=style["overlay_linewidth_surrogate"],
+        color=colors["L"], label="L (Surrogate)"
+    )
+    ax.plot(
+        t, surrogate[:, 3], "--",
+        linewidth=style["overlay_linewidth_surrogate"],
+        color=colors["B"], label="B (Surrogate)"
+    )
 
-    ax.set_xlabel("Time step")
-    ax.set_ylabel("State fraction")
-    ax.set_title(f"ABM vs surrogate — {model_name}")
+    ax.set_xlabel("Time step", fontsize=style["overlay_axis_label_fontsize"])
+    ax.set_ylabel("State fraction", fontsize=style["overlay_axis_label_fontsize"])
+    ax.set_title(
+        f"ABM vs surrogate — {model_name}",
+        fontsize=style["overlay_title_fontsize"],
+    )
     ax.set_ylim(0.0, 1.0)
-    ax.grid(True, alpha=0.3)
-    ax.legend(ncol=2)
+    ax.grid(True, alpha=style["grid_alpha"])
+    ax.tick_params(axis="both", labelsize=style["overlay_tick_fontsize"])
+    ax.legend(ncol=2, fontsize=style["overlay_legend_fontsize"])
 
     save_path = save_dir / f"validation_abm_to_surrogate_overlay_{model_name}.pdf"
     _save_fig(fig, save_path)
@@ -442,7 +511,12 @@ def run_validation(
     print_summary_table(results_df)
 
     if make_histograms:
-        plot_error_histograms(results_df, save_dir=output_dir, show=show)
+        plot_error_histograms(
+            results_df,
+            save_dir=output_dir,
+            style=PLOT_STYLE,
+            show=show,
+        )
         print("Saved histogram figures.")
 
     if make_overlay:
@@ -452,6 +526,7 @@ def run_validation(
             surrogate_path=surrogate_path,
             simulation_dt=simulation_dt,
             save_dir=output_dir,
+            style=PLOT_STYLE,
             show=show,
         )
         print(f"Saved overlay figure for model: {overlay_model_name}")

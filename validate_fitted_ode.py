@@ -40,6 +40,44 @@ import pandas as pd
 from utils import BASE_DIR, get_all_model_names
 
 
+# =========================
+# Figure style parameters
+# Edit here to tune visuals
+# =========================
+PLOT_STYLE = {
+    # general
+    "grid_alpha": 0.3,
+
+    # histogram figures
+    "hist_fig_width": 6.0,
+    "hist_fig_height": 4.0,
+    "hist_title_fontsize": 14,
+    "hist_axis_label_fontsize": 12,
+    "hist_tick_fontsize": 11,
+
+    # parity figures
+    "parity_fig_width": 5.5,
+    "parity_fig_height": 5.5,
+    "parity_title_fontsize": 20,
+    "parity_axis_label_fontsize": 18,
+    "parity_tick_fontsize": 16,
+
+    # parity scatter appearance
+    "parity_marker_size": 10,
+    "parity_marker_alpha": 0.20,
+    "parity_identity_linewidth": 1.5,
+
+    # example overlay figures
+    "overlay_fig_width": 7.0,
+    "overlay_fig_height": 4.5,
+    "overlay_title_fontsize": 14,
+    "overlay_axis_label_fontsize": 12,
+    "overlay_tick_fontsize": 11,
+    "overlay_legend_fontsize": 10,
+    "overlay_linewidth_abm": 2.0,
+    "overlay_linewidth_ode": 2.0,
+}
+
 STATE_ORDER = ["S", "Q", "L", "B"]
 
 
@@ -271,6 +309,7 @@ def plot_error_histograms(
     results_df: pd.DataFrame,
     *,
     save_dir: Path,
+    style: dict = PLOT_STYLE,
     show: bool = False,
 ) -> None:
     metrics = [
@@ -285,19 +324,23 @@ def plot_error_histograms(
         if len(vals) == 0:
             continue
 
-        fig = plt.figure(figsize=(6, 4))
-        plt.hist(vals, bins=30)
-        plt.xlabel(col)
-        plt.ylabel("Count")
-        plt.title(title)
-        plt.grid(True, alpha=0.3)
+        fig = plt.figure(
+            figsize=(style["hist_fig_width"], style["hist_fig_height"])
+        )
+        ax = plt.gca()
+
+        ax.hist(vals, bins=30)
+        ax.set_xlabel(col, fontsize=style["hist_axis_label_fontsize"])
+        ax.set_ylabel("Count", fontsize=style["hist_axis_label_fontsize"])
+        ax.set_title(title, fontsize=style["hist_title_fontsize"])
+        ax.grid(True, alpha=style["grid_alpha"])
+        ax.tick_params(axis="both", labelsize=style["hist_tick_fontsize"])
 
         save_path = save_dir / f"validation_abm_to_ode_hist_{col}.pdf"
         _save_fig(fig, save_path)
 
         if show:
             plt.show()
-
 
 def _parity_plot(
     x: np.ndarray,
@@ -307,6 +350,7 @@ def _parity_plot(
     ylabel: str,
     title: str,
     save_path: Path,
+    style: dict = PLOT_STYLE,
     show: bool = False,
 ) -> None:
     mask = np.isfinite(x) & np.isfinite(y)
@@ -319,26 +363,58 @@ def _parity_plot(
     lo = min(float(np.min(x)), float(np.min(y)))
     hi = max(float(np.max(x)), float(np.max(y)))
 
-    fig = plt.figure(figsize=(5.5, 5.0))
-    plt.scatter(x, y, alpha=0.65)
-    plt.plot([lo, hi], [lo, hi], linestyle="--")
-    plt.xlabel(xlabel)
-    plt.ylabel(ylabel)
-    plt.title(title)
-    plt.xlim(lo, hi)
-    plt.ylim(lo, hi)
-    plt.grid(True, alpha=0.3)
+    # Pearson correlation
+    corr = float(np.corrcoef(x, y)[0, 1]) if len(x) >= 2 else np.nan
+    print(f"{title}: Pearson correlation = {corr:.6f}")
+
+    fig = plt.figure(
+        figsize=(style["parity_fig_width"], style["parity_fig_height"])
+    )
+    ax = plt.gca()
+
+    ax.scatter(
+        x,
+        y,
+        s=style["parity_marker_size"],
+        alpha=style["parity_marker_alpha"],
+    )
+    ax.plot(
+        [lo, hi],
+        [lo, hi],
+        linestyle="--",
+        linewidth=style["parity_identity_linewidth"],
+    )
+
+    ax.set_xlabel(xlabel, fontsize=style["parity_axis_label_fontsize"])
+    ax.set_ylabel(ylabel, fontsize=style["parity_axis_label_fontsize"])
+    ax.set_title(title, fontsize=style["parity_title_fontsize"])
+    ax.set_xlim(lo, hi)
+    ax.set_ylim(lo, hi)
+    ax.grid(True, alpha=style["grid_alpha"])
+    ax.tick_params(axis="both", labelsize=style["parity_tick_fontsize"])
+
+    # Show correlation on figure
+    '''
+    ax.text(
+        0.05,
+        0.95,
+        f"r = {corr:.3f}",
+        transform=ax.transAxes,
+        ha="left",
+        va="top",
+    )
+    '''
 
     _save_fig(fig, save_path)
 
     if show:
         plt.show()
 
-
 def plot_parity_figures(
     results_df: pd.DataFrame,
     *,
     save_dir: Path,
+    style: dict = PLOT_STYLE,
     show: bool = False,
 ) -> None:
     parity_specs = [
@@ -346,26 +422,26 @@ def plot_parity_figures(
             "final_abm_adoption",
             "final_ode_adoption",
             "ABM final adoption",
-            "ODE final adoption",
+            "Fitted CTMC/ODE final adoption",
             "Parity plot: final adoption",
             save_dir / "validation_abm_to_ode_parity_adoption.pdf",
         ),
-        (
-            "final_abm_quiet_share",
-            "final_ode_quiet_share",
-            "ABM final quiet share",
-            "ODE final quiet share",
-            "Parity plot: final quiet share",
-            save_dir / "validation_abm_to_ode_parity_quiet_share.pdf",
-        ),
-        (
-            "final_abm_loud_share",
-            "final_ode_loud_share",
-            "ABM final loud share",
-            "ODE final loud share",
-            "Parity plot: final loud share",
-            save_dir / "validation_abm_to_ode_parity_loud_share.pdf",
-        ),
+        # (
+        #     "final_abm_quiet_share",
+        #     "final_ode_quiet_share",
+        #     "ABM final quiet share",
+        #     "ODE final quiet share",
+        #     "Parity plot: final quiet share",
+        #     save_dir / "validation_abm_to_ode_parity_quiet_share.pdf",
+        # ),
+        # (
+        #     "final_abm_loud_share",
+        #     "final_ode_loud_share",
+        #     "ABM final loud share",
+        #     "ODE final loud share",
+        #     "Parity plot: final loud share",
+        #     save_dir / "validation_abm_to_ode_parity_loud_share.pdf",
+        # ),
     ]
 
     for xcol, ycol, xlabel, ylabel, title, save_path in parity_specs:
@@ -376,15 +452,16 @@ def plot_parity_figures(
             ylabel=ylabel,
             title=title,
             save_path=save_path,
+            style=style,
             show=show,
         )
-
 
 def plot_example_overlays(
     base_dir: Path,
     model_names: list[str],
     *,
     save_dir: Path,
+    style: dict = PLOT_STYLE,
     show: bool = False,
 ) -> None:
     for model_name in model_names:
@@ -396,13 +473,31 @@ def plot_example_overlays(
         abm = _extract_abm_array(df)
         ode = _simulate_ode_fractions(Q, abm[0].copy(), len(df), dt=dt)
 
-        fig = plt.figure(figsize=(7, 4.5))
+        fig = plt.figure(
+            figsize=(style["overlay_fig_width"], style["overlay_fig_height"])
+        )
         ax = plt.gca()
 
-        line_S = ax.plot(t, abm[:, 0], label="S (ABM)")[0]
-        line_Q = ax.plot(t, abm[:, 1], label="Q (ABM)")[0]
-        line_L = ax.plot(t, abm[:, 2], label="L (ABM)")[0]
-        line_B = ax.plot(t, abm[:, 3], label="B (ABM)")[0]
+        line_S = ax.plot(
+            t, abm[:, 0],
+            linewidth=style["overlay_linewidth_abm"],
+            label="S (ABM)"
+        )[0]
+        line_Q = ax.plot(
+            t, abm[:, 1],
+            linewidth=style["overlay_linewidth_abm"],
+            label="Q (ABM)"
+        )[0]
+        line_L = ax.plot(
+            t, abm[:, 2],
+            linewidth=style["overlay_linewidth_abm"],
+            label="L (ABM)"
+        )[0]
+        line_B = ax.plot(
+            t, abm[:, 3],
+            linewidth=style["overlay_linewidth_abm"],
+            label="B (ABM)"
+        )[0]
 
         colors = {
             "S": line_S.get_color(),
@@ -411,17 +506,37 @@ def plot_example_overlays(
             "B": line_B.get_color(),
         }
 
-        ax.plot(t, ode[:, 0], "--", color=colors["S"], label="S (ODE)")
-        ax.plot(t, ode[:, 1], "--", color=colors["Q"], label="Q (ODE)")
-        ax.plot(t, ode[:, 2], "--", color=colors["L"], label="L (ODE)")
-        ax.plot(t, ode[:, 3], "--", color=colors["B"], label="B (ODE)")
+        ax.plot(
+            t, ode[:, 0], "--",
+            linewidth=style["overlay_linewidth_ode"],
+            color=colors["S"], label="S (ODE)"
+        )
+        ax.plot(
+            t, ode[:, 1], "--",
+            linewidth=style["overlay_linewidth_ode"],
+            color=colors["Q"], label="Q (ODE)"
+        )
+        ax.plot(
+            t, ode[:, 2], "--",
+            linewidth=style["overlay_linewidth_ode"],
+            color=colors["L"], label="L (ODE)"
+        )
+        ax.plot(
+            t, ode[:, 3], "--",
+            linewidth=style["overlay_linewidth_ode"],
+            color=colors["B"], label="B (ODE)"
+        )
 
-        ax.set_xlabel("Time step (t)")
-        ax.set_ylabel("Agent ratio")
-        ax.set_title(f"ABM vs fitted ODE — {model_name}")
+        ax.set_xlabel("Time step (t)", fontsize=style["overlay_axis_label_fontsize"])
+        ax.set_ylabel("Agent ratio", fontsize=style["overlay_axis_label_fontsize"])
+        ax.set_title(
+            f"ABM vs fitted ODE — {model_name}",
+            fontsize=style["overlay_title_fontsize"],
+        )
         ax.set_ylim(0.0, 1.0)
-        ax.grid(True, alpha=0.3)
-        ax.legend(ncol=2)
+        ax.grid(True, alpha=style["grid_alpha"])
+        ax.tick_params(axis="both", labelsize=style["overlay_tick_fontsize"])
+        ax.legend(ncol=2, fontsize=style["overlay_legend_fontsize"])
 
         save_path = save_dir / f"validation_abm_to_ode_overlay_{model_name}.pdf"
         _save_fig(fig, save_path)
@@ -487,6 +602,7 @@ def run_validation(
     verbose: bool = True,
 ) -> pd.DataFrame:
     figures_dir = base_dir / "figures" / "validation_abm_to_fitted_ode"
+    figures_dir.mkdir(parents=True, exist_ok=True)
 
     results_df = evaluate_all_models(
         base_dir,
@@ -502,11 +618,11 @@ def run_validation(
     print_summary_table(results_df)
 
     if make_histograms:
-        plot_error_histograms(results_df, save_dir=figures_dir, show=show)
+        plot_error_histograms(results_df, save_dir=figures_dir, style=PLOT_STYLE, show=show)
         print("Saved histogram figures.")
 
     if make_parity_plots:
-        plot_parity_figures(results_df, save_dir=figures_dir, show=show)
+        plot_parity_figures(results_df, save_dir=figures_dir, style=PLOT_STYLE, show=show)
         print("Saved parity figures.")
 
     if make_example_overlays:
@@ -521,6 +637,7 @@ def run_validation(
                 base_dir,
                 example_models,
                 save_dir=figures_dir,
+                style=PLOT_STYLE,
                 show=show,
             )
             print(f"Saved overlay figures for examples: {example_models}")
@@ -535,7 +652,7 @@ if __name__ == "__main__":
         min_adoption_for_composition=0.05,
         make_histograms=True,
         make_parity_plots=True,
-        make_example_overlays=True,
+        make_example_overlays=False,
         n_best_examples=1,
         n_median_examples=1,
         n_worst_examples=1,
