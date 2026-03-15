@@ -268,9 +268,9 @@ if __name__ == "__main__":
             "Negative\ninitial opinion",
         ],
         column_titles=[
-            "Small organization\n(5 teams, 5 members each)",
-            "Medium organization\n(10 teams, 10 members each)",
-            "Medium organization\n(15 teams, 15 members each)",
-            "Large organization\n(20 teams, 20 members each)",
+            "5 teams × 5 members",
+            "10 teams × 10 members",
+            "15 teams × 15 members",
+            "20 teams × 20 members",
         ]
     )

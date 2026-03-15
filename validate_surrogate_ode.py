@@ -53,9 +53,9 @@ PLOT_STYLE = {
     # histogram figures
     "hist_fig_width": 6.0,
     "hist_fig_height": 4.0,
-    "hist_title_fontsize": 19,
-    "hist_axis_label_fontsize": 16,
-    "hist_tick_fontsize": 15,
+    "hist_title_fontsize": 23,
+    "hist_axis_label_fontsize": 19,
+    "hist_tick_fontsize": 18,
 
     # overlay figure
     "overlay_fig_width": 7.0,
@@ -369,6 +369,7 @@ def plot_error_histograms(
 ) -> None:
     metrics = [
         ("trajectory_rmse", "Trajectory RMSE"),
+        #("trajectory_rmse", ""),
         ("final_abs_error_adoption", "Final adoption absolute error"),
         ("final_abs_error_quiet_share", "Final quiet-share absolute error"),
         ("final_abs_error_loud_share", "Final loud-share absolute error"),
@@ -389,7 +390,12 @@ def plot_error_histograms(
         ax.hist(vals, bins=30, weights=weights)
         ax.set_xlabel(title, fontsize=style["hist_axis_label_fontsize"])
         ax.set_ylabel("Share of scenarios", fontsize=style["hist_axis_label_fontsize"])
-        ax.set_title(title, fontsize=style["hist_title_fontsize"])
+        #ax.set_title(title, fontsize=style["hist_title_fontsize"])
+        ax.set_title(
+            "Surrogate-ABM Trajectory Error Distribution",
+            fontsize=style["hist_title_fontsize"],
+            pad=20
+        )
         ax.grid(True, alpha=style["grid_alpha"])
         ax.tick_params(axis="both", labelsize=style["hist_tick_fontsize"])
 
