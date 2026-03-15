@@ -80,6 +80,42 @@ PLOT_STYLE = {
 
 STATE_ORDER = ["S", "Q", "L", "B"]
 
+def _r2_score(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """
+    Standard coefficient of determination:
+        R^2 = 1 - SSE / SST
+    Returns NaN if SST == 0.
+    """
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+
+    sse = float(np.sum((y_pred - y_true) ** 2))
+    sst = float(np.sum((y_true - np.mean(y_true)) ** 2))
+
+    if np.isclose(sst, 0.0):
+        return np.nan
+
+    return 1.0 - sse / sst
+
+
+def _pooled_state_r2(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """
+    Aggregate R^2 across all SQLB states using state-wise means in SST.
+
+    y_true, y_pred: shape (T, 4)
+    """
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+
+    sse = float(np.sum((y_pred - y_true) ** 2))
+
+    state_means = np.mean(y_true, axis=0, keepdims=True)  # shape (1, 4)
+    sst = float(np.sum((y_true - state_means) ** 2))
+
+    if np.isclose(sst, 0.0):
+        return np.nan
+
+    return 1.0 - sse / sst
 
 def _load_states_df(states_dir: Path, model_name: str) -> pd.DataFrame:
     csv_path = states_dir / f"{model_name}.csv"
@@ -174,6 +210,10 @@ def _compute_state_metrics(
         out[f"rmse_{state}"] = float(np.sqrt(np.mean(sq_diff[:, i])))
         out[f"mae_{state}"] = float(np.mean(abs_diff[:, i]))
         out[f"final_abs_error_{state}"] = float(abs_diff[-1, i])
+        out[f"r2_{state}"] = _r2_score(abm[:, i], ode[:, i])
+
+    # Aggregate pooled R^2 across all states and time steps
+    out["r2_pooled_states"] = _pooled_state_r2(abm, ode)
 
     # Aggregate trajectory metrics across all states and time steps
     out["trajectory_rmse"] = float(np.sqrt(np.mean(sq_diff)))
@@ -183,8 +223,10 @@ def _compute_state_metrics(
     # Adoption metrics
     abm_adoption = abm[:, 1] + abm[:, 2]
     ode_adoption = ode[:, 1] + ode[:, 2]
+
     out["rmse_adoption"] = float(np.sqrt(np.mean((ode_adoption - abm_adoption) ** 2)))
     out["mae_adoption"] = float(np.mean(np.abs(ode_adoption - abm_adoption)))
+    out["r2_adoption"] = _r2_score(abm_adoption, ode_adoption)
     out["final_abm_adoption"] = float(abm_adoption[-1])
     out["final_ode_adoption"] = float(ode_adoption[-1])
     out["final_abs_error_adoption"] = float(abs(ode_adoption[-1] - abm_adoption[-1]))
@@ -282,8 +324,18 @@ def evaluate_all_models(
     return pd.DataFrame(rows)
 
 
-def print_summary_table(results_df: pd.DataFrame) -> None:
+def print_summary_table(
+    results_df: pd.DataFrame,
+    *,
+    save_path: Path | None = None,
+) -> pd.DataFrame:
     summary_cols = [
+        "r2_pooled_states",
+        "r2_S",
+        "r2_Q",
+        "r2_L",
+        "r2_B",
+        "r2_adoption",
         "trajectory_rmse",
         "trajectory_mae",
         "rmse_adoption",
@@ -295,8 +347,17 @@ def print_summary_table(results_df: pd.DataFrame) -> None:
     ]
     available = [c for c in summary_cols if c in results_df.columns]
 
+    summary_df = results_df[available].describe().round(6)
+
     print("\nValidation summary statistics:")
-    print(results_df[available].describe().round(6))
+    print(summary_df)
+
+    if save_path is not None:
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        summary_df.to_csv(save_path)
+        print(f"Saved summary statistics to: {save_path}")
+
+    return summary_df
 
 
 def _save_fig(fig: plt.Figure, path: Path) -> None:
@@ -615,7 +676,10 @@ def run_validation(
         results_df.to_csv(results_csv_path, index=False)
         print(f"\nSaved per-model validation results to: {results_csv_path}")
 
-    print_summary_table(results_df)
+    print_summary_table(
+        results_df,
+        save_path=figures_dir / "validation_abm_to_fitted_ode_summary.csv",
+    )
 
     if make_histograms:
         plot_error_histograms(results_df, save_dir=figures_dir, style=PLOT_STYLE, show=show)

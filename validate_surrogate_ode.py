@@ -70,6 +70,42 @@ PLOT_STYLE = {
 
 STATE_ORDER = ["S", "Q", "L", "B"]
 
+def _r2_score(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """
+    Standard coefficient of determination:
+        R^2 = 1 - SSE / SST
+    Returns NaN if SST == 0.
+    """
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+
+    sse = float(np.sum((y_pred - y_true) ** 2))
+    sst = float(np.sum((y_true - np.mean(y_true)) ** 2))
+
+    if np.isclose(sst, 0.0):
+        return np.nan
+
+    return 1.0 - sse / sst
+
+
+def _pooled_state_r2(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """
+    Aggregate R^2 across all SQLB states using state-wise means in SST.
+
+    y_true, y_pred: shape (T, 4)
+    """
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+
+    sse = float(np.sum((y_pred - y_true) ** 2))
+
+    state_means = np.mean(y_true, axis=0, keepdims=True)  # shape (1, 4)
+    sst = float(np.sum((y_true - state_means) ** 2))
+
+    if np.isclose(sst, 0.0):
+        return np.nan
+
+    return 1.0 - sse / sst
 
 def _load_states_df(states_dir: Path, model_name: str) -> pd.DataFrame:
     csv_path = states_dir / f"{model_name}.csv"
