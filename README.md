@@ -2,7 +2,7 @@
 
 Submitted to ASME IDETC
 
-![Example Network](figures/network_example_1.pdf)
+![Example Network](figures/network_example_1.png)
 
 ## Overview
 This project develops a multi-scale computational pipeline for studying AI adoption in engineering organizations. The framework connects agent-based modeling, reduced-order dynamical modeling, and decision-space exploration.
@@ -21,7 +21,7 @@ Surrogate / Steady-State Adoption Estimation
 Design-Space Analysis
 ```
 
-![Workflow Diagram](figures/workflow.pdf)
+![Workflow Diagram](figures/workflow.png)
 
 This structure allows complex behavioral dynamics to be translated into interpretable policy and strategy tradeoffs.
 
